@@ -1,0 +1,13 @@
+langchain-text-splitters
+beautifulsoup4
+langchain-community
+langchain-openai
+langchain_chroma
+python-dotenv
+zhipuai
+langchain
+langchain-core
+zai-sdk
+lxml
+rank-bm25
+jieba
