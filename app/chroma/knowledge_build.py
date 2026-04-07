@@ -69,10 +69,24 @@ def etl():
     )
     docs = loader.load()
     print(f"共加载 {len(docs)} 个页面（期望 {len(web_paths)} 个 URL）")
+
+    # 对纯图片页面用 GLM-4V-Flash OCR 补充文本
+    import sys, pathlib
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+    from common.image_ocr import ocr_page_images
     for d in docs:
         src = d.metadata.get("source", "")
         n = len(d.page_content or "")
-        print(f"  {src}  ->  {n} 字符")
+        if n < 50:
+            print(f"  {src}  ->  {n} 字符 (文本过短，尝试 OCR 图片)")
+            ocr_text = ocr_page_images(src)
+            if ocr_text:
+                d.page_content = ocr_text
+                print(f"    OCR 后: {len(ocr_text)} 字符")
+            else:
+                print(f"    OCR 未提取到内容")
+        else:
+            print(f"  {src}  ->  {n} 字符")
 
     # T-加工
     text_splitter = RecursiveCharacterTextSplitter(
