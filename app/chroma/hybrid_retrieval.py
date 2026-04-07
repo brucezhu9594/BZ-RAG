@@ -1,14 +1,14 @@
 import os
 from collections import defaultdict
 
-import jieba
-from rank_bm25 import BM25Okapi
 from langchain.tools import tool
 from langchain_core.documents import Document
 from dotenv import load_dotenv
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_chroma import Chroma
 from langchain_openai import ChatOpenAI
+
+from app.chroma.bm25_index import build_bm25_index, _tokenize
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -19,10 +19,6 @@ RRF_K = 60
 FINAL_TOP_K = 6
 DENSE_WEIGHT = 0.5
 BM25_WEIGHT = 0.5
-
-
-def _tokenize(text: str) -> list[str]:
-    return [w for w in jieba.cut(text) if w.strip()]
 
 
 def _rrf_merge(
@@ -51,21 +47,6 @@ def _rrf_merge(
     return [doc_map[uid] for uid, _ in ranked[:top_n]]
 
 
-def _build_bm25_index(vector_store: Chroma):
-    """从 Chroma 全量读取文档，构建 BM25 索引。"""
-    col = vector_store._collection
-    all_data = col.get(include=["documents", "metadatas"])
-
-    documents: list[Document] = []
-    tokenized_corpus: list[list[str]] = []
-    for doc_text, meta in zip(all_data["documents"], all_data["metadatas"]):
-        documents.append(Document(page_content=doc_text, metadata=meta or {}))
-        tokenized_corpus.append(_tokenize(doc_text))
-
-    bm25 = BM25Okapi(tokenized_corpus)
-    return bm25, documents
-
-
 def _retrieve_for_query(query: str) -> tuple[str, list]:
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
     vector_store = Chroma(
@@ -79,7 +60,7 @@ def _retrieve_for_query(query: str) -> tuple[str, list]:
     print(f"[Dense] query: {query}, 返回 {len(dense_docs)} 条")
 
     # --- 路径 2: BM25 关键词检索 ---
-    bm25, all_docs = _build_bm25_index(vector_store)
+    bm25, all_docs = build_bm25_index(vector_store)
     query_tokens = _tokenize(query)
     bm25_scores = bm25.get_scores(query_tokens)
     top_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[:BM25_K]
