@@ -5,10 +5,10 @@ from urllib.parse import urljoin, urlparse
 
 import bs4
 from dotenv import load_dotenv
-from langchain_chroma import Chroma
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from pymilvus import MilvusClient, DataType, Function, FunctionType
 
 os.environ.setdefault(
     "USER_AGENT",
@@ -20,6 +20,7 @@ HELP_INDEX_URL = "https://cms.hewa.cn/content/mian/helpContent"
 _HELP_CONTENT_ID_RE = re.compile(r"/content/mian/helpContent/(\d+)/?$", re.IGNORECASE)
 
 load_dotenv()
+
 
 def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[str]:
     """从帮助中心索引页解析所有 helpContent/{{文档id}} 链接并去重、按 id 数字排序。"""
@@ -85,19 +86,61 @@ def etl():
 
     # L-加载（向量化存储）
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
-    # 向量数据库chroma
-    vector_store = Chroma(
-        collection_name="hewa_help_collection",
-        embedding_function=embeddings,
-        persist_directory="./db",
+    client = MilvusClient(uri="http://localhost:19530")
+
+    collection_name = "hewa_help_collection"
+    # 如已存在则先删除，保证全量重建
+    if client.has_collection(collection_name):
+        client.drop_collection(collection_name)
+
+    # 先 embed 一条拿到维度
+    sample_vec = embeddings.embed_query(all_splits[0].page_content)
+    dim = len(sample_vec)
+
+    schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
+    schema.add_field("id", DataType.INT64, is_primary=True)
+    schema.add_field("text", DataType.VARCHAR, max_length=65535,
+                     enable_analyzer=True, enable_match=True)
+    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
+    schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
+
+    # BM25 Function: 自动从 text 生成 sparse_vector
+    bm25_fn = Function(
+        name="text_bm25",
+        input_field_names=["text"],
+        output_field_names=["sparse_vector"],
+        function_type=FunctionType.BM25,
     )
-    # 分批插入（ZhipuAI 单次最多 64 条）
+    schema.add_function(bm25_fn)
+
+    index_params = client.prepare_index_params()
+    index_params.add_index(field_name="vector", metric_type="COSINE", index_type="FLAT")
+    index_params.add_index(field_name="sparse_vector", metric_type="BM25",
+                           index_type="AUTOINDEX")
+
+    client.create_collection(
+        collection_name=collection_name,
+        schema=schema,
+        index_params=index_params,
+    )
+
+    # 分批 embed + 插入（ZhipuAI 单次最多 64 条）
     BATCH_SIZE = 64
-    for i in range(0, len(all_splits), BATCH_SIZE):
-        batch = all_splits[i:i + BATCH_SIZE]
-        vector_store.add_documents(documents=batch)
-        print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(batch)} 条")
-    print(f"已插入 {len(all_splits)} 条文档到 Chroma")
+    texts = [doc.page_content for doc in all_splits]
+    metadatas = [doc.metadata for doc in all_splits]
+    total = 0
+    for i in range(0, len(texts), BATCH_SIZE):
+        batch_texts = texts[i:i + BATCH_SIZE]
+        batch_metas = metadatas[i:i + BATCH_SIZE]
+        batch_vectors = embeddings.embed_documents(batch_texts)
+        data = [
+            {"text": t, "vector": v, "source": m.get("source", "")}
+            for t, v, m in zip(batch_texts, batch_vectors, batch_metas)
+        ]
+        client.insert(collection_name=collection_name, data=data)
+        total += len(data)
+        print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(data)} 条")
+    print(f"已插入 {total} 条文档到 Milvus")
 
 
 if __name__ == "__main__":

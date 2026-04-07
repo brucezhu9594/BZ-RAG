@@ -11,3 +11,5 @@ zai-sdk
 lxml
 rank-bm25
 jieba
+langchain-milvus
+pymilvus

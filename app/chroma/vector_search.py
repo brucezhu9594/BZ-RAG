@@ -15,12 +15,12 @@ def _retrieve_for_query(query: str) -> tuple[str, list]:
         embedding_function=embeddings,
         persist_directory="./db",
     )
-    retrieved_docs = vector_store.similarity_search(query, k=6)
+    retrieved_docs = vector_store.similarity_search(query, k=2)
+    print(f"retrieved_docs: {retrieved_docs}")
     serialized = "\n\n".join(
-        f"Source: {doc.metadata}\nContent: {doc.page_content}"
+        f"Content: {doc.page_content}"
         for doc in retrieved_docs
     )
-    print(f"serialized documents: {serialized}")
     return serialized, retrieved_docs
 
 @tool(response_format="content_and_artifact")
@@ -39,6 +39,7 @@ def rag(user_input: str) -> str:
         "如果检索结果不足以回答，请明确说明知识库中没有相关信息，不要编造。"
         f"\n\n--- 检索结果 ---\n{serialized}"
     )
+    print(f"system_prompt: {system_prompt}")
     llm = ChatOpenAI(
         model=MODEL,
         temperature=0.7,
