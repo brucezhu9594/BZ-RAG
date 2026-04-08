@@ -1,5 +1,7 @@
 import os
 import re
+import sys
+import pathlib
 import urllib.request
 from urllib.parse import urljoin, urlparse
 
@@ -8,7 +10,12 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pymilvus import MilvusClient, DataType, Function, FunctionType
+from langchain_qdrant import QdrantVectorStore
+from qdrant_client import QdrantClient, models
+
+from app.qdrant.bm25 import build_and_save
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 os.environ.setdefault(
     "USER_AGENT",
@@ -18,6 +25,8 @@ os.environ.setdefault(
 
 HELP_INDEX_URL = "https://cms.hewa.cn/content/mian/helpContent"
 _HELP_CONTENT_ID_RE = re.compile(r"/content/mian/helpContent/(\d+)/?$", re.IGNORECASE)
+
+COLLECTION_NAME = "hewa_help_collection"
 
 load_dotenv()
 
@@ -61,7 +70,7 @@ def etl():
     if not web_paths:
         raise RuntimeError("未从索引页解析到任何 helpContent/{{id}} 链接，请检查页面结构或网络。")
 
-    # E-提取（加载）文档（该站为 Nuxt SSR，正文在 content-header / help-content-detail）
+    # E-提取
     loader = WebBaseLoader(
         web_paths=web_paths,
         requests_per_second=2,
@@ -72,8 +81,6 @@ def etl():
     print(f"共加载 {len(docs)} 个页面（期望 {len(web_paths)} 个 URL）")
 
     # 对纯图片页面用 GLM-4V-Flash OCR 补充文本
-    import sys, pathlib
-    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from common.image_ocr import ocr_page_images
     for d in docs:
         src = d.metadata.get("source", "")
@@ -100,63 +107,61 @@ def etl():
 
     # L-加载（向量化存储）
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
-    client = MilvusClient(uri="http://localhost:19530")
+    client = QdrantClient(host="localhost", port=6333)
 
-    collection_name = "hewa_help_collection"
-    # 如已存在则先删除，保证全量重建
-    if client.has_collection(collection_name):
-        client.drop_collection(collection_name)
+    # 如已存在则先删除
+    if client.collection_exists(COLLECTION_NAME):
+        client.delete_collection(COLLECTION_NAME)
 
     # 先 embed 一条拿到维度
     sample_vec = embeddings.embed_query(all_splits[0].page_content)
     dim = len(sample_vec)
 
-    schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
-    schema.add_field("id", DataType.INT64, is_primary=True)
-    schema.add_field("text", DataType.VARCHAR, max_length=65535,
-                     enable_analyzer=True, enable_match=True)
-    schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
-    schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
-
-    # BM25 Function: 自动从 text 生成 sparse_vector
-    bm25_fn = Function(
-        name="text_bm25",
-        input_field_names=["text"],
-        output_field_names=["sparse_vector"],
-        function_type=FunctionType.BM25,
-    )
-    schema.add_function(bm25_fn)
-
-    index_params = client.prepare_index_params()
-    index_params.add_index(field_name="vector", metric_type="COSINE", index_type="HNSW")
-    index_params.add_index(field_name="sparse_vector", metric_type="BM25",
-                           index_type="AUTOINDEX")
-
     client.create_collection(
-        collection_name=collection_name,
-        schema=schema,
-        index_params=index_params,
+        collection_name=COLLECTION_NAME,
+        vectors_config=models.VectorParams(size=dim, distance=models.Distance.COSINE),
+        sparse_vectors_config={"bm25": models.SparseVectorParams()},
     )
 
-    # 分批 embed + 插入（ZhipuAI 单次最多 64 条）
+    vector_store = QdrantVectorStore(
+        client=client,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings,
+    )
+
+    # 分批插入（ZhipuAI 单次最多 64 条）
     BATCH_SIZE = 64
-    texts = [doc.page_content for doc in all_splits]
-    metadatas = [doc.metadata for doc in all_splits]
     total = 0
-    for i in range(0, len(texts), BATCH_SIZE):
-        batch_texts = texts[i:i + BATCH_SIZE]
-        batch_metas = metadatas[i:i + BATCH_SIZE]
-        batch_vectors = embeddings.embed_documents(batch_texts)
-        data = [
-            {"text": t, "vector": v, "source": m.get("source", "")}
-            for t, v, m in zip(batch_texts, batch_vectors, batch_metas)
-        ]
-        client.insert(collection_name=collection_name, data=data)
-        total += len(data)
-        print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(data)} 条")
-    print(f"已插入 {total} 条文档到 Milvus")
-    # 确保数据立即持久化
-    client.flush(collection_name)
+    for i in range(0, len(all_splits), BATCH_SIZE):
+        batch = all_splits[i:i + BATCH_SIZE]
+        vector_store.add_documents(documents=batch)
+        total += len(batch)
+        print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(batch)} 条")
+
+    # 补充 BM25 稀疏向量（构建并保存词汇表/IDF 到 bm25_meta.json）
+    texts = [doc.page_content for doc in all_splits]
+    sparse_vectors = build_and_save(texts)
+
+    # 获取已插入的 point ids
+    all_points = []
+    offset = None
+    while True:
+        result = client.scroll(collection_name=COLLECTION_NAME, limit=100, offset=offset)
+        points, offset = result
+        all_points.extend(points)
+        if offset is None:
+            break
+
+    # 按插入顺序更新 sparse 向量
+    for point, sparse_vec in zip(all_points, sparse_vectors):
+        client.update_vectors(
+            collection_name=COLLECTION_NAME,
+            points=[models.PointVectors(id=point.id, vector={"bm25": sparse_vec})],
+        )
+
+    print(f"已插入 {total} 条文档到 Qdrant（含 BM25 稀疏向量）")
+    client.close()
+
 
 if __name__ == "__main__":
     etl()
