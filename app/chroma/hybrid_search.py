@@ -1,10 +1,9 @@
 import os
 
-from langchain.tools import tool
-from langchain_core.documents import Document
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_community.embeddings import ZhipuAIEmbeddings
+from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 
 from app.chroma.bm25_index import build_bm25_index, _tokenize
@@ -49,12 +48,6 @@ def _retrieve(query: str) -> tuple[str, list[Document]]:
         for doc in merged
     )
     return serialized, merged
-
-
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    return _retrieve(query)
 
 
 def rag(user_input: str) -> str:

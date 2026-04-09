@@ -1,12 +1,13 @@
 import os
-from langchain.tools import tool
+
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_chroma import Chroma
+from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
+
 
 def _retrieve_for_query(query: str) -> tuple[str, list]:
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
@@ -23,11 +24,6 @@ def _retrieve_for_query(query: str) -> tuple[str, list]:
     )
     return serialized, retrieved_docs
 
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    serialized, retrieved_docs = _retrieve_for_query(query)
-    return serialized, retrieved_docs
 
 def rag(user_input: str) -> str:
     # 使用「检索 + 单轮对话」，避免 create_agent 的 tools 调用。

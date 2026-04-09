@@ -8,41 +8,52 @@
 网页爬取 → 图片 OCR → 文本切分 → 向量化入库 → 检索 → LLM 生成回答
 ```
 
-系统提供两套向量数据库实现（Chroma / Milvus），三种检索方式：
+系统提供三套向量数据库实现（Chroma / Milvus / Qdrant），两种运行模式（直接检索 / Agent 模式）：
 
-| 检索方式 | 实现 | 说明 |
-|---------|------|------|
-| 纯向量检索 | Chroma / Milvus | 基于语义相似度的稠密向量检索 |
-| 手动混合检索 | Chroma | Dense + BM25 关键词检索，RRF 融合排序 |
-| 原生混合检索 | Milvus | Dense + 内置 BM25 稀疏向量，RRF 融合排序，服务端完成 |
+| 向量数据库 | 部署方式 | 混合检索实现 |
+|-----------|---------|-------------|
+| Chroma | 本地嵌入，无需 Docker | 手动 BM25 + RRF（Python 端） |
+| Milvus | Docker Compose（etcd + MinIO + Milvus） | 内置 BM25 Function + 服务端 RRF |
+| Qdrant | Docker 或本地文件 | 手动 BM25 稀疏向量 + 服务端 RRF |
 
 ## 目录结构
 
 ```
 BZ-RAG/
 ├── app/
-│   ├── chroma/                  # Chroma 向量数据库实现
-│   │   ├── knowledge_build.py   # 知识库构建（ETL + OCR）
-│   │   ├── vector_search.py     # 纯向量检索 + RAG
-│   │   ├── hybrid_search.py     # 混合检索 + RAG（手动 BM25 + RRF）
-│   │   ├── bm25_index.py        # BM25 索引构建与缓存
-│   │   ├── rrf.py               # RRF 融合排序算法
-│   │   └── db/                  # Chroma 本地持久化数据
-│   ├── milvus/                  # Milvus 向量数据库实现
-│   │   ├── knowledge_build.py   # 知识库构建（ETL + OCR + BM25 稀疏向量）
-│   │   ├── vector_search.py     # 纯向量检索 + RAG
-│   │   └── hybrid_search.py     # 原生混合检索 + RAG
-│   └── common/
-│       └── image_ocr.py         # GLM-4V-Flash 图片文字识别
-├── .env                         # 环境变量配置
-├── .env.example                 # 环境变量模板
-└── requirements.txt             # Python 依赖
+│   ├── chroma/                        # Chroma 向量数据库实现
+│   │   ├── knowledge_build.py         # 知识库构建（ETL + OCR）
+│   │   ├── vector_search.py           # 纯向量检索 + RAG
+│   │   ├── vector_search_agent.py     # 纯向量检索 Agent 模式（create_agent + tool）
+│   │   ├── hybrid_search.py           # 混合检索 + RAG（手动 BM25 + RRF）
+│   │   ├── hybrid_search_agent.py     # 混合检索 Agent 模式（create_agent + tool）
+│   │   ├── bm25_index.py             # BM25 索引构建与缓存
+│   │   ├── rrf.py                    # RRF 融合排序算法
+│   │   └── db/                       # Chroma 本地持久化数据
+│   ├── milvus/                        # Milvus 向量数据库实现
+│   │   ├── knowledge_build.py         # 知识库构建（ETL + OCR + BM25 稀疏向量）
+│   │   ├── vector_search.py           # 纯向量检索 + RAG
+│   │   ├── hybrid_search.py           # 原生混合检索 + RAG（服务端 RRF）
+│   │   └── docker-compose.yml         # Milvus 服务编排（etcd + MinIO + Milvus + Attu）
+│   └── qdrant/                        # Qdrant 向量数据库实现
+│       ├── knowledge_build.py         # 知识库构建（ETL + OCR + BM25 稀疏向量）
+│       ├── vector_search.py           # 纯向量检索 + RAG（langchain_qdrant）
+│       ├── hybrid_search.py           # 混合检索 + RAG（Prefetch + 服务端 RRF）
+│       ├── bm25.py                   # BM25 稀疏向量工具（构建/保存/查询）
+│       └── bm25_meta.json            # BM25 词汇表/IDF 持久化文件（自动生成）
+├── common/
+│   ├── image_ocr.py                   # GLM-4V-Flash 图片文字识别
+│   └── ocr.py                        # OCR 工具
+├── .env                              # 环境变量配置
+├── .env.example                      # 环境变量模板
+├── requirements.txt                  # Python 依赖
+└── README.md
 ```
 
 ## 环境依赖
 
 - Python 3.10+
-- Docker（Milvus 方案需要）
+- Docker（Milvus / Qdrant 方案需要）
 
 ### 外部服务
 
@@ -84,29 +95,48 @@ pip install -r requirements.txt
 # 1. 构建知识库
 python app/chroma/knowledge_build.py
 
-# 2. 运行问答（纯向量检索）
-python app/chroma/vector_search.py
-
-# 或运行混合检索
-python app/chroma/hybrid_search.py
+# 2. 运行问答（任选一种）
+python app/chroma/vector_search.py          # 纯向量检索
+python app/chroma/hybrid_search.py          # 混合检索
+python app/chroma/vector_search_agent.py    # Agent 模式（纯向量）
+python app/chroma/hybrid_search_agent.py    # Agent 模式（混合检索）
 ```
 
 ### 方案二：Milvus（需要 Docker）
 
 ```bash
-# 1. 启动 Milvus 服务（etcd + MinIO + Milvus）
-cd E:/docker/milvus
+# 1. 启动 Milvus 服务
+cd app/milvus
 docker compose up -d
 
 # 2. 构建知识库
 python app/milvus/knowledge_build.py
 
-# 3. 运行问答（纯向量检索）
-python app/milvus/vector_search.py
-
-# 或运行混合检索
-python app/milvus/hybrid_search.py
+# 3. 运行问答
+python app/milvus/vector_search.py          # 纯向量检索
+python app/milvus/hybrid_search.py          # 混合检索（原生 BM25 + RRF）
 ```
+
+Milvus 管理界面：
+- Attu（可视化管理）：http://localhost:3000
+- MinIO 控制台：http://localhost:9001（minioadmin/minioadmin）
+- WebUI：http://localhost:9091/webui
+
+### 方案三：Qdrant（Docker 或本地文件）
+
+```bash
+# 1. 启动 Qdrant 服务（可选，也支持本地文件模式）
+docker run -d --name qdrant -p 6333:6333 -p 6334:6334 qdrant/qdrant
+
+# 2. 构建知识库
+python app/qdrant/knowledge_build.py
+
+# 3. 运行问答
+python app/qdrant/vector_search.py          # 纯向量检索（langchain_qdrant）
+python app/qdrant/hybrid_search.py          # 混合检索（BM25 + RRF）
+```
+
+Qdrant Dashboard：http://localhost:6333/dashboard
 
 ## 知识库构建流程
 
@@ -121,6 +151,7 @@ python app/milvus/hybrid_search.py
                  
 3. Load      ─  ZhipuAI embedding-3 向量化，分批（64条/批）写入向量库
                  Milvus 方案额外自动生成 BM25 稀疏向量
+                 Qdrant 方案手动计算 BM25 稀疏向量并持久化词汇表
 ```
 
 ## 检索方式对比
@@ -139,3 +170,22 @@ python app/milvus/hybrid_search.py
 - 优势：兼顾语义理解和关键词精确匹配，检索质量更高
 - Chroma 方案：手动构建 BM25 索引 + Python 端 RRF 融合
 - Milvus 方案：内置 BM25 Function + 服务端 RRF 融合，性能更优
+- Qdrant 方案：手动 BM25 稀疏向量 + Prefetch 服务端 RRF 融合
+
+### Agent 模式（*_agent）
+
+使用 LangChain 的 `create_agent` + tool calling，由 LLM 自主决定是否调用检索工具。
+
+- 优势：支持多步推理，LLM 可判断是否需要检索
+- 劣势：依赖模型的 function calling 能力，部分模型可能不兼容
+
+## 三套方案对比
+
+| 特性 | Chroma | Milvus | Qdrant |
+|------|--------|--------|--------|
+| 部署复杂度 | 最低（纯本地） | 高（Docker Compose） | 中（Docker 单容器） |
+| 混合检索 | Python 端手动融合 | 服务端原生支持 | 服务端 Prefetch + RRF |
+| BM25 实现 | rank_bm25 库 | 内置 BM25 Function | 手动计算稀疏向量 |
+| 可视化工具 | 无 | Attu | 内置 Dashboard |
+| Agent 模式 | 支持 | 待实现 | 待实现 |
+| 适用场景 | 快速原型/小数据量 | 生产环境/大数据量 | 中等规模/灵活部署 |

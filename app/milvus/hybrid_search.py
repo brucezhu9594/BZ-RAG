@@ -1,7 +1,6 @@
 import os
 
 from dotenv import load_dotenv
-from langchain.tools import tool
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker
@@ -54,12 +53,6 @@ def _retrieve(query: str) -> tuple[str, list[dict]]:
         for r in results[0]
     )
     return serialized, results[0]
-
-
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    return _retrieve(query)
 
 
 def rag(user_input: str) -> str:

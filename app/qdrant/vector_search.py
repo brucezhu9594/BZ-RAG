@@ -1,7 +1,6 @@
 import os
 
 from dotenv import load_dotenv
-from langchain.tools import tool
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore, RetrievalMode
@@ -31,12 +30,6 @@ def _retrieve(query: str) -> tuple[str, list]:
         for doc in results
     )
     return serialized, results
-
-
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    return _retrieve(query)
 
 
 def rag(user_input: str) -> str:

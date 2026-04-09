@@ -1,7 +1,6 @@
 import os
 
 from dotenv import load_dotenv
-from langchain.tools import tool
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from qdrant_client import QdrantClient, models
@@ -53,12 +52,6 @@ def _retrieve(query: str) -> tuple[str, list]:
     )
     client.close()
     return serialized, results
-
-
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    return _retrieve(query)
 
 
 def rag(user_input: str) -> str:

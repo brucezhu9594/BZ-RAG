@@ -1,7 +1,6 @@
 import os
 
 from dotenv import load_dotenv
-from langchain.tools import tool
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from pymilvus import MilvusClient
@@ -32,13 +31,6 @@ def _retrieve_for_query(query: str) -> tuple[str, list[dict]]:
         for r in results
     )
     return serialized, results
-
-
-@tool(response_format="content_and_artifact")
-def retrieve_context(query: str):
-    """Retrieve information to help answer a query."""
-    serialized, retrieved_docs = _retrieve_for_query(query)
-    return serialized, retrieved_docs
 
 
 def rag(user_input: str) -> str:
