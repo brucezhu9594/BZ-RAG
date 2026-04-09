@@ -2,8 +2,11 @@ import os
 
 from dotenv import load_dotenv
 from langchain_community.embeddings import ZhipuAIEmbeddings
+from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker
+
+from common.zhipu_rerank import rerank
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -13,7 +16,8 @@ COLLECTION_NAME = "hewa_help_collection"
 
 DENSE_LIMIT = 10
 SPARSE_LIMIT = 10
-FINAL_TOP_K = 2
+RETRIEVE_TOP_K = 6
+RERANK_TOP_K = 2
 RRF_K = 60
 
 
@@ -39,20 +43,32 @@ def _retrieve(query: str) -> tuple[str, list[dict]]:
         limit=SPARSE_LIMIT,
     )
 
-    # RRF 融合排序
+    # RRF 融合排序（多取候选，交给 Rerank 精排）
     results = client.hybrid_search(
         collection_name=COLLECTION_NAME,
         reqs=[dense_req, sparse_req],
         ranker=RRFRanker(k=RRF_K),
-        limit=FINAL_TOP_K,
+        limit=RETRIEVE_TOP_K,
         output_fields=["text", "source"],
     )
 
-    serialized = "\n\n".join(
-        f"Source: {r['entity'].get('source', '')}\nContent: {r['entity'].get('text', '')}"
+    # 转换为 Document 供 Rerank 使用
+    candidates = [
+        Document(
+            page_content=r["entity"].get("text", ""),
+            metadata={"source": r["entity"].get("source", "")},
+        )
         for r in results[0]
+    ]
+
+    # Rerank 精排
+    reranked = rerank(query, candidates, top_n=RERANK_TOP_K)
+
+    serialized = "\n\n".join(
+        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}"
+        for doc in reranked
     )
-    return serialized, results[0]
+    return serialized, reranked
 
 
 def rag(user_input: str) -> str:

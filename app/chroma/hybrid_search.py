@@ -8,13 +8,15 @@ from langchain_openai import ChatOpenAI
 
 from app.chroma.bm25_index import build_bm25_index, _tokenize
 from app.chroma.rrf import rrf_merge
+from common.reranker import rerank
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
 
 DENSE_K = 10
 BM25_K = 10
-FINAL_TOP_K = 2
+RETRIEVE_TOP_K = 6
+RERANK_TOP_K = 2
 
 
 def _get_vector_store() -> Chroma:
@@ -41,13 +43,16 @@ def _retrieve(query: str) -> tuple[str, list[Document]]:
     bm25_docs = [all_docs[i] for i in top_indices]
 
     # RRF 融合
-    merged = rrf_merge(dense_docs, bm25_docs, top_n=FINAL_TOP_K)
+    merged = rrf_merge(dense_docs, bm25_docs, top_n=RETRIEVE_TOP_K)
+
+    # Reranker 重排序
+    reranked = rerank(query, merged, top_n=RERANK_TOP_K)
 
     serialized = "\n\n".join(
         f"Source: {doc.metadata}\nContent: {doc.page_content}"
-        for doc in merged
+        for doc in reranked
     )
-    return serialized, merged
+    return serialized, reranked
 
 
 def rag(user_input: str) -> str:
