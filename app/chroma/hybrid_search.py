@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from app.chroma.bm25_index import build_bm25_index, _tokenize
 from app.chroma.rrf import rrf_merge
 from common.reranker import rerank
+from common.query_rewriter import rewrite_query
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -28,14 +29,19 @@ def _get_vector_store() -> Chroma:
 
 
 def _retrieve(query: str) -> tuple[str, list[Document]]:
+    # 查询改写
+    rewritten = rewrite_query(query)
+    if rewritten != query:
+        print(f"[查询改写] {query} → {rewritten}")
+
     vector_store = _get_vector_store()
 
     # 路径 1: Dense 向量检索
-    dense_docs = vector_store.similarity_search(query, k=DENSE_K)
+    dense_docs = vector_store.similarity_search(rewritten, k=DENSE_K)
 
     # 路径 2: BM25 关键词检索
     bm25, all_docs = build_bm25_index(vector_store)
-    query_tokens = _tokenize(query)
+    query_tokens = _tokenize(rewritten)
     bm25_scores = bm25.get_scores(query_tokens)
     top_indices = sorted(
         range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
