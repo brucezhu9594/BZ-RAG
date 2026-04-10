@@ -9,7 +9,7 @@ from langchain_openai import ChatOpenAI
 from app.chroma.bm25_index import build_bm25_index, _tokenize
 from app.chroma.rrf import rrf_merge
 from common.reranker import rerank
-from common.query_rewriter import rewrite_query
+from common.query_expansion import expand_query
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -28,30 +28,48 @@ def _get_vector_store() -> Chroma:
     )
 
 
+def _deduplicate(docs: list[Document]) -> list[Document]:
+    """按 page_content 去重，保留首次出现的顺序。"""
+    seen = set()
+    result = []
+    for doc in docs:
+        key = doc.page_content[:100]
+        if key not in seen:
+            seen.add(key)
+            result.append(doc)
+    return result
+
+
 def _retrieve(query: str) -> tuple[str, list[Document]]:
-    # 查询改写
-    rewritten = rewrite_query(query)
-    if rewritten != query:
-        print(f"[查询改写] {query} → {rewritten}")
+    # 多查询扩展
+    sub_queries = expand_query(query)
+    print(f"[多查询扩展] {query} → {sub_queries}")
 
     vector_store = _get_vector_store()
-
-    # 路径 1: Dense 向量检索
-    dense_docs = vector_store.similarity_search(rewritten, k=DENSE_K)
-
-    # 路径 2: BM25 关键词检索
     bm25, all_docs = build_bm25_index(vector_store)
-    query_tokens = _tokenize(rewritten)
-    bm25_scores = bm25.get_scores(query_tokens)
-    top_indices = sorted(
-        range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
-    )[:BM25_K]
-    bm25_docs = [all_docs[i] for i in top_indices]
 
-    # RRF 融合
-    merged = rrf_merge(dense_docs, bm25_docs, top_n=RETRIEVE_TOP_K)
+    # 对每个子查询分别做 Dense + BM25 检索
+    all_dense_docs: list[Document] = []
+    all_bm25_docs: list[Document] = []
+    for sub_q in sub_queries:
+        # Dense
+        dense_docs = vector_store.similarity_search(sub_q, k=DENSE_K)
+        all_dense_docs.extend(dense_docs)
 
-    # Reranker 重排序
+        # BM25
+        query_tokens = _tokenize(sub_q)
+        bm25_scores = bm25.get_scores(query_tokens)
+        top_indices = sorted(
+            range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
+        )[:BM25_K]
+        all_bm25_docs.extend(all_docs[i] for i in top_indices)
+
+    # 去重 + RRF 融合
+    all_dense_docs = _deduplicate(all_dense_docs)
+    all_bm25_docs = _deduplicate(all_bm25_docs)
+    merged = rrf_merge(all_dense_docs, all_bm25_docs, top_n=RETRIEVE_TOP_K)
+
+    # Reranker 重排序（用原始 query 打分）
     reranked = rerank(query, merged, top_n=RERANK_TOP_K)
 
     serialized = "\n\n".join(

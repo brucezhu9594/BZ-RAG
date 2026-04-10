@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 from qdrant_client import QdrantClient, models
 
 from app.qdrant.bm25 import query_sparse_vector
+from common.keyword_expansion import expand_keywords
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -21,8 +22,13 @@ def _retrieve(query: str) -> tuple[str, list]:
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
     client = QdrantClient(host="localhost", port=6333)
 
+    # 关键词补充（增强 BM25 路召回）
+    expanded_query = expand_keywords(query)
+    if expanded_query != query:
+        print(f"[关键词补充] {query} → {expanded_query}")
+
     query_vector = embeddings.embed_query(query)
-    query_sparse = query_sparse_vector(query)
+    query_sparse = query_sparse_vector(expanded_query)
 
     # Dense + Sparse 混合检索，RRF 融合
     prefetch = [
@@ -45,9 +51,10 @@ def _retrieve(query: str) -> tuple[str, list]:
         limit=FINAL_TOP_K,
         with_payload=True,
     ).points
+    print(f"results:{results}")
 
     serialized = "\n\n".join(
-        f"Source: {p.payload.get('source', '')}\nContent: {p.payload.get('text', '')}"
+        f"Source: {p.payload.get('metadata').get('source', '')}\nContent: {p.payload.get('page_content', '')}"
         for p in results
     )
     client.close()

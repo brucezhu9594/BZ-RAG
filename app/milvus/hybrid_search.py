@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker
 
 from common.zhipu_rerank import rerank
+from common.contextual_rewriter import contextual_rewrite
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -19,13 +20,19 @@ SPARSE_LIMIT = 10
 RETRIEVE_TOP_K = 6
 RERANK_TOP_K = 2
 RRF_K = 60
+MAX_HISTORY_ROUNDS = 3  # 保留最近 N 轮对话
 
 
-def _retrieve(query: str) -> tuple[str, list[dict]]:
+def _retrieve(query: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
+    # 历史感知查询改写
+    rewritten = contextual_rewrite(query, history or [])
+    if rewritten != query:
+        print(f"[历史感知改写] {query} → {rewritten}")
+
     embeddings = ZhipuAIEmbeddings(model="embedding-3")
     client = MilvusClient(uri=MILVUS_URI)
 
-    query_vector = embeddings.embed_query(query)
+    query_vector = embeddings.embed_query(rewritten)
 
     # 路径 1: Dense 向量语义检索
     dense_req = AnnSearchRequest(
@@ -37,7 +44,7 @@ def _retrieve(query: str) -> tuple[str, list[dict]]:
 
     # 路径 2: Sparse BM25 关键词检索
     sparse_req = AnnSearchRequest(
-        data=[query],
+        data=[rewritten],
         anns_field="sparse_vector",
         param={"metric_type": "BM25"},
         limit=SPARSE_LIMIT,
@@ -71,8 +78,8 @@ def _retrieve(query: str) -> tuple[str, list[dict]]:
     return serialized, reranked
 
 
-def rag(user_input: str) -> str:
-    serialized, _ = _retrieve(user_input)
+def rag(user_input: str, history: list[dict] | None = None) -> str:
+    serialized, _ = _retrieve(user_input, history)
     system_prompt = (
         "你是一个知识库检索助手。"
         "下面「检索结果」来自知识库片段，请仅依据这些内容回答用户问题。"
@@ -80,17 +87,18 @@ def rag(user_input: str) -> str:
         f"\n\n--- 检索结果 ---\n{serialized}"
     )
     llm = ChatOpenAI(model=MODEL, temperature=0.7)
-    msg = llm.invoke(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_input},
-        ]
-    )
+    messages = [{"role": "system", "content": system_prompt}]
+    # 带上历史上下文，让回答连贯
+    if history:
+        messages.extend(history)
+    messages.append({"role": "user", "content": user_input})
+    msg = llm.invoke(messages)
     return msg.content or ""
 
 
 def main():
     print("Chat with AI (type 'exit' to quit)")
+    history: list[dict] = []
     while True:
         user_input = input("You: ").strip()
         if user_input.lower() == "exit":
@@ -99,7 +107,16 @@ def main():
         if not user_input:
             print("请输入内容，不能为空\n")
             continue
-        print(f"AI: {rag(user_input)}")
+
+        # 滑动窗口：只保留最近 N 轮（每轮 = 1条user + 1条assistant = 2条）
+        recent_history = history[-(MAX_HISTORY_ROUNDS * 2):]
+
+        answer = rag(user_input, recent_history)
+        print(f"AI: {answer}")
+
+        # 记录本轮对话
+        history.append({"role": "user", "content": user_input})
+        history.append({"role": "assistant", "content": answer})
 
 
 if __name__ == "__main__":
