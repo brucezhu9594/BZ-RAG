@@ -3,3 +3,4 @@ app/chroma/db
 .claude
 app/test.py
 .idea
+.description.txt

@@ -1,0 +1,77 @@
+[
+  {
+    "question": "职位PM是做什么的",
+    "ground_truth": "职位PM是禾蛙平台的工作人员，协助接单顾问与发单顾问之间进行沟通，接单顾问可以向PM进行订单管理问题咨询、发票问题咨询、佣金支付咨询等",
+    "expected_source": "helpContent/10536"
+  },
+  {
+    "question": "如何注销已注册的禾蛙账号",
+    "ground_truth": "账号一旦注销不可恢复。先解绑手机号，在电脑端账户设置-账号与安全页面点击注销，提交注销申请，3-5个工作日完成注销",
+    "expected_source": "helpContent/10538"
+  },
+  {
+    "question": "盲推简历会受到什么处罚",
+    "ground_truth": "接单方严禁盲推候选人简历，未经候选人同意推荐简历属于违规行为",
+    "expected_source": "helpContent/10573"
+  },
+  {
+    "question": "发单方可以发布虚假职位吗",
+    "ground_truth": "发单方严禁发布虚假职位",
+    "expected_source": "helpContent/10575"
+  },
+  {
+    "question": "怎么联系职位PM",
+    "ground_truth": "可以从职位详情页面找到职位PM的沟通位置，点击进入项目群，也可以扫码进入项目群联系PM",
+    "expected_source": "helpContent/10536"
+  },
+  {
+    "question": "禾蛙平台是什么",
+    "ground_truth": "禾蛙是一个专注于猎头招聘之间职位缺口、职位发布的综合人力资源平台",
+    "expected_source": "helpContent/10256"
+  },
+  {
+    "question": "入驻禾蛙平台需要什么条件",
+    "ground_truth": "入驻驻场需要通过平台审核，需要开通权限",
+    "expected_source": "helpContent/10537"
+  },
+  {
+    "question": "佣金怎么结算",
+    "ground_truth": "佣金结算可以咨询职位PM，通过平台进行佣金支付",
+    "expected_source": "helpContent/10536"
+  },
+  {
+    "question": "平台企业文化是什么",
+    "ground_truth": "秉持以用户为中心的核心企业文化，以用户作为一切的原点和基准，实事求是做出决策和承诺",
+    "expected_source": "helpContent/10005"
+  },
+  {
+    "question": "如何在平台上发布招聘职位",
+    "ground_truth": "需要先开通发单方权限，然后可以在平台上发布招聘职位",
+    "expected_source": "helpContent/10534"
+  },
+  {
+    "question": "候选人简历推荐有什么注意事项",
+    "ground_truth": "推荐候选人需要经过候选人同意，不能盲推简历，需要与候选人充分沟通后再进行推荐",
+    "expected_source": "helpContent/10573"
+  },
+  {
+    "question": "发票怎么开",
+    "ground_truth": "发票相关问题可以咨询职位PM，PM可以协助处理发票问题",
+    "expected_source": "helpContent/10536"
+  },
+  {
+    "question": "平台有哪些通用行为规范",
+    "ground_truth": "平台友好绿色的通用行为规范，包括诚信沟通、及时响应等",
+    "expected_source": "helpContent/10570"
+  },
+  {
+    "question": "发单方需要及时初筛吗",
+    "ground_truth": "发单方需要及时初筛，对接单方推荐的候选人进行及时筛选和反馈",
+    "expected_source": "helpContent/10574"
+  },
+  {
+    "question": "禾蛙平台的联系方式是什么",
+    "ground_truth": "禾蛙平台域名hewa.cn，成立于2020年，属于深圳精聘云聘数据技术有限公司",
+    "expected_source": "helpContent/10006"
+  }
+]
