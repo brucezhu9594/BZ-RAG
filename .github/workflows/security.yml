@@ -1,8 +1,16 @@
 name: Security Scan
 
 on:
+  push:
+    branches: [master]
+    paths:
+      - "requirements.txt"
+      - ".github/workflows/security.yml"
   pull_request:
     branches: [master]
+    paths:
+      - "requirements.txt"
+      - ".github/workflows/security.yml"
   schedule:
     - cron: "0 6 * * 1" # 每周一 6 点 UTC 扫描
 

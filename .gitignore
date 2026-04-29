@@ -4,3 +4,16 @@ app/chroma/db
 app/test.py
 .idea
 .description.txt
+
+# Python 字节码
+__pycache__/
+*.pyc
+
+# 工具缓存
+.pytest_cache/
+.ruff_cache/
+
+# 测试覆盖率产物
+.coverage
+coverage.json
+htmlcov/
