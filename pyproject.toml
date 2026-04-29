@@ -29,3 +29,15 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--cov=common --cov-report=term-missing --cov-report=json --cov-branch"
+
+[tool.coverage.run]
+omit = [
+    "*/__pycache__/*",
+    "*/.venv/*",
+    "tests/*",
+]

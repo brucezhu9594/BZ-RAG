@@ -1,0 +1,78 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: pytest
+
+      - name: Generate coverage report
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            let body = '## Test Coverage Report\n\n';
+            try {
+              const data = JSON.parse(fs.readFileSync('coverage.json', 'utf8'));
+              const t = data.totals;
+              body += '| Metric | Covered | Total | Percent |\n';
+              body += '|--------|---------|-------|--------|\n';
+              body += `| Statements | ${t.covered_lines} | ${t.num_statements} | ${t.percent_covered.toFixed(1)}% |\n`;
+              if (t.num_branches) {
+                const branchPct = (t.covered_branches / t.num_branches * 100).toFixed(1);
+                body += `| Branches | ${t.covered_branches} | ${t.num_branches} | ${branchPct}% |\n`;
+              }
+            } catch {
+              body += '_Coverage report not available._\n';
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const marker = '## Test Coverage Report';
+            const existing = comments.find(c => c.body?.startsWith(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
