@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pymilvus import MilvusClient, DataType, Function, FunctionType
+from pymilvus import DataType, Function, FunctionType, MilvusClient
 
 os.environ.setdefault(
     "USER_AGENT",
@@ -24,9 +24,7 @@ load_dotenv()
 
 def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[str]:
     """从帮助中心索引页解析所有 helpContent/{{文档id}} 链接并去重、按 id 数字排序。"""
-    req = urllib.request.Request(
-        index_url, headers={"User-Agent": os.environ["USER_AGENT"]}
-    )
+    req = urllib.request.Request(index_url, headers={"User-Agent": os.environ["USER_AGENT"]})
     with urllib.request.urlopen(req, timeout=60) as resp:
         enc = resp.headers.get_content_charset() or "utf-8"
         html = resp.read().decode(enc, "replace")
@@ -49,9 +47,7 @@ def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[
 def _help_page_loader_kwargs():
     return dict(
         bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(
-                id=lambda i: i in ("content-header", "help-content-detail")
-            )
+            parse_only=bs4.SoupStrainer(id=lambda i: i in ("content-header", "help-content-detail"))
         ),
     )
 
@@ -72,9 +68,12 @@ def etl():
     print(f"共加载 {len(docs)} 个页面（期望 {len(web_paths)} 个 URL）")
 
     # 对纯图片页面用 GLM-4V-Flash OCR 补充文本
-    import sys, pathlib
+    import pathlib
+    import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from common.image_ocr import ocr_page_images
+
     for d in docs:
         src = d.metadata.get("source", "")
         n = len(d.page_content or "")
@@ -85,7 +84,7 @@ def etl():
                 d.page_content = ocr_text
                 print(f"    OCR 后: {len(ocr_text)} 字符")
             else:
-                print(f"    OCR 未提取到内容")
+                print("    OCR 未提取到内容")
         else:
             print(f"  {src}  ->  {n} 字符")
 
@@ -113,8 +112,9 @@ def etl():
 
     schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
     schema.add_field("id", DataType.INT64, is_primary=True)
-    schema.add_field("text", DataType.VARCHAR, max_length=65535,
-                     enable_analyzer=True, enable_match=True)
+    schema.add_field(
+        "text", DataType.VARCHAR, max_length=65535, enable_analyzer=True, enable_match=True
+    )
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
     schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)
 
@@ -129,8 +129,7 @@ def etl():
 
     index_params = client.prepare_index_params()
     index_params.add_index(field_name="vector", metric_type="COSINE", index_type="HNSW")
-    index_params.add_index(field_name="sparse_vector", metric_type="BM25",
-                           index_type="AUTOINDEX")
+    index_params.add_index(field_name="sparse_vector", metric_type="BM25", index_type="AUTOINDEX")
 
     client.create_collection(
         collection_name=collection_name,
@@ -144,12 +143,12 @@ def etl():
     metadatas = [doc.metadata for doc in all_splits]
     total = 0
     for i in range(0, len(texts), BATCH_SIZE):
-        batch_texts = texts[i:i + BATCH_SIZE]
-        batch_metas = metadatas[i:i + BATCH_SIZE]
+        batch_texts = texts[i : i + BATCH_SIZE]
+        batch_metas = metadatas[i : i + BATCH_SIZE]
         batch_vectors = embeddings.embed_documents(batch_texts)
         data = [
             {"text": t, "vector": v, "source": m.get("source", "")}
-            for t, v, m in zip(batch_texts, batch_vectors, batch_metas)
+            for t, v, m in zip(batch_texts, batch_vectors, batch_metas, strict=False)
         ]
         client.insert(collection_name=collection_name, data=data)
         total += len(data)
@@ -157,6 +156,7 @@ def etl():
     print(f"已插入 {total} 条文档到 Milvus")
     # 确保数据立即持久化
     client.flush(collection_name)
+
 
 if __name__ == "__main__":
     etl()

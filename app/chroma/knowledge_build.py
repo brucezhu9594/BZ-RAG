@@ -21,11 +21,10 @@ _HELP_CONTENT_ID_RE = re.compile(r"/content/mian/helpContent/(\d+)/?$", re.IGNOR
 
 load_dotenv()
 
+
 def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[str]:
     """从帮助中心索引页解析所有 helpContent/{{文档id}} 链接并去重、按 id 数字排序。"""
-    req = urllib.request.Request(
-        index_url, headers={"User-Agent": os.environ["USER_AGENT"]}
-    )
+    req = urllib.request.Request(index_url, headers={"User-Agent": os.environ["USER_AGENT"]})
     with urllib.request.urlopen(req, timeout=60) as resp:
         enc = resp.headers.get_content_charset() or "utf-8"
         html = resp.read().decode(enc, "replace")
@@ -48,9 +47,7 @@ def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[
 def _help_page_loader_kwargs():
     return dict(
         bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(
-                id=lambda i: i in ("content-header", "help-content-detail")
-            )
+            parse_only=bs4.SoupStrainer(id=lambda i: i in ("content-header", "help-content-detail"))
         ),
     )
 
@@ -71,9 +68,12 @@ def etl():
     print(f"共加载 {len(docs)} 个页面（期望 {len(web_paths)} 个 URL）")
 
     # 对纯图片页面用 GLM-4V-Flash OCR 补充文本
-    import sys, pathlib
+    import pathlib
+    import sys
+
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
     from common.image_ocr import ocr_page_images
+
     for d in docs:
         src = d.metadata.get("source", "")
         n = len(d.page_content or "")
@@ -84,7 +84,7 @@ def etl():
                 d.page_content = ocr_text
                 print(f"    OCR 后: {len(ocr_text)} 字符")
             else:
-                print(f"    OCR 未提取到内容")
+                print("    OCR 未提取到内容")
         else:
             print(f"  {src}  ->  {n} 字符")
 
@@ -108,7 +108,7 @@ def etl():
     # 分批插入（ZhipuAI 单次最多 64 条）
     BATCH_SIZE = 64
     for i in range(0, len(all_splits), BATCH_SIZE):
-        batch = all_splits[i:i + BATCH_SIZE]
+        batch = all_splits[i : i + BATCH_SIZE]
         vector_store.add_documents(documents=batch)
         print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(batch)} 条")
     print(f"已插入 {len(all_splits)} 条文档到 Chroma")

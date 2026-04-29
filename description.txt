@@ -1,0 +1,15 @@
+ 项目描述
+
+  RAG 知识库智能问答系统
+
+  基于 RAG（检索增强生成）架构构建的企业知识库问答系统，实现从数据采集、向量化存储到智能检索、大模型回答的全链路闭环。
+
+  - 数据采集与处理： 自动爬取帮助中心网页文档，对纯图片页面调用 GLM-4V-Flash 视觉模型进行 OCR 识别，使用 RecursiveCharacterTextSplitter 按中文语义切分，解决长文档语义稀释导致的检索精度问题
+  - 多向量数据库对比实践： 分别基于 Chroma（本地嵌入）、Milvus（Docker Compose 部署）、Qdrant（Docker 部署）实现知识库存储与检索，深入对比三者在索引构建、混合检索、部署运维方面的差异
+  - 混合检索策略： 实现 Dense 向量语义检索 + BM25 稀疏关键词检索双路召回，通过 RRF（Reciprocal Rank Fusion）融合排序；Milvus 方案利用内置 BM25 Function 实现服务端原生混合检索，Qdrant 方案通过 Prefetch + Fusion
+   实现服务端 RRF
+  - 检索质量优化： 集成 BGE-Reranker 本地交叉编码器模型对候选文档精排；设计多种查询优化策略——多查询扩展（LLM 拆分子查询多路召回）、历史感知查询改写（指代消歧）、同义词关键词补充（增强 BM25 召回率）
+  - 多轮对话支持： 基于滑动窗口维护对话历史，结合历史上下文进行查询改写和回答生成，支持连续追问场景
+  - Agent 模式： 基于 LangChain create_agent + tool calling 构建 ReAct Agent，由大模型自主决策检索时机
+
+  技术栈： Python、LangChain、Chroma、Milvus、Qdrant、ZhipuAI Embedding、BGE-Reranker、MiniMax LLM、Docker Compose

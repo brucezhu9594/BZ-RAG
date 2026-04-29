@@ -26,10 +26,7 @@ def _retrieve_for_query(query: str) -> tuple[str, list[dict]]:
     )[0]
 
     print(f"results: {results}")
-    serialized = "\n\n".join(
-        f"Content: {r['entity'].get('text', '')}"
-        for r in results
-    )
+    serialized = "\n\n".join(f"Content: {r['entity'].get('text', '')}" for r in results)
     return serialized, results
 
 

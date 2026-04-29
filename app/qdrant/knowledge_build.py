@@ -1,7 +1,7 @@
 import os
+import pathlib
 import re
 import sys
-import pathlib
 import urllib.request
 from urllib.parse import urljoin, urlparse
 
@@ -9,8 +9,8 @@ import bs4
 from dotenv import load_dotenv
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.embeddings import ZhipuAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_qdrant import QdrantVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient, models
 
 from app.qdrant.bm25 import build_and_save
@@ -33,9 +33,7 @@ load_dotenv()
 
 def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[str]:
     """从帮助中心索引页解析所有 helpContent/{{文档id}} 链接并去重、按 id 数字排序。"""
-    req = urllib.request.Request(
-        index_url, headers={"User-Agent": os.environ["USER_AGENT"]}
-    )
+    req = urllib.request.Request(index_url, headers={"User-Agent": os.environ["USER_AGENT"]})
     with urllib.request.urlopen(req, timeout=60) as resp:
         enc = resp.headers.get_content_charset() or "utf-8"
         html = resp.read().decode(enc, "replace")
@@ -58,9 +56,7 @@ def discover_help_content_article_urls(index_url: str = HELP_INDEX_URL) -> list[
 def _help_page_loader_kwargs():
     return dict(
         bs_kwargs=dict(
-            parse_only=bs4.SoupStrainer(
-                id=lambda i: i in ("content-header", "help-content-detail")
-            )
+            parse_only=bs4.SoupStrainer(id=lambda i: i in ("content-header", "help-content-detail"))
         ),
     )
 
@@ -82,6 +78,7 @@ def etl():
 
     # 对纯图片页面用 GLM-4V-Flash OCR 补充文本
     from common.image_ocr import ocr_page_images
+
     for d in docs:
         src = d.metadata.get("source", "")
         n = len(d.page_content or "")
@@ -92,7 +89,7 @@ def etl():
                 d.page_content = ocr_text
                 print(f"    OCR 后: {len(ocr_text)} 字符")
             else:
-                print(f"    OCR 未提取到内容")
+                print("    OCR 未提取到内容")
         else:
             print(f"  {src}  ->  {n} 字符")
 
@@ -133,7 +130,7 @@ def etl():
     BATCH_SIZE = 64
     total = 0
     for i in range(0, len(all_splits), BATCH_SIZE):
-        batch = all_splits[i:i + BATCH_SIZE]
+        batch = all_splits[i : i + BATCH_SIZE]
         vector_store.add_documents(documents=batch)
         total += len(batch)
         print(f"  已插入第 {i // BATCH_SIZE + 1} 批，共 {len(batch)} 条")
@@ -153,7 +150,7 @@ def etl():
             break
 
     # 按插入顺序更新 sparse 向量
-    for point, sparse_vec in zip(all_points, sparse_vectors):
+    for point, sparse_vec in zip(all_points, sparse_vectors, strict=False):
         client.update_vectors(
             collection_name=COLLECTION_NAME,
             points=[models.PointVectors(id=point.id, vector={"bm25": sparse_vec})],

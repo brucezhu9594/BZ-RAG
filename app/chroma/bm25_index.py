@@ -1,7 +1,7 @@
 import jieba
-from rank_bm25 import BM25Okapi
-from langchain_core.documents import Document
 from langchain_chroma import Chroma
+from langchain_core.documents import Document
+from rank_bm25 import BM25Okapi
 
 _cache: dict[str, tuple[BM25Okapi, list[Document]]] = {}
 
@@ -21,7 +21,7 @@ def build_bm25_index(vector_store: Chroma) -> tuple[BM25Okapi, list[Document]]:
 
     documents: list[Document] = []
     tokenized_corpus: list[list[str]] = []
-    for doc_text, meta in zip(all_data["documents"], all_data["metadatas"]):
+    for doc_text, meta in zip(all_data["documents"], all_data["metadatas"], strict=False):
         documents.append(Document(page_content=doc_text, metadata=meta or {}))
         tokenized_corpus.append(_tokenize(doc_text))
 

@@ -31,10 +31,7 @@ def extract_images_from_page(url: str) -> list[str]:
     detail = soup.find(id="help-content-detail")
     if not detail:
         return []
-    return [
-        urljoin(url, img["src"])
-        for img in detail.find_all("img", src=True)
-    ]
+    return [urljoin(url, img["src"]) for img in detail.find_all("img", src=True)]
 
 
 def ocr_image(image_url: str) -> str:
@@ -42,13 +39,18 @@ def ocr_image(image_url: str) -> str:
     client = _get_client()
     resp = client.chat.completions.create(
         model="glm-4v-flash",
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "image_url", "image_url": {"url": image_url}},
-                {"type": "text", "text": "请提取这张图片中的所有文字内容，保持原始结构，只输出文字不要解释。"},
-            ],
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {
+                        "type": "text",
+                        "text": "请提取这张图片中的所有文字内容，保持原始结构，只输出文字不要解释。",
+                    },
+                ],
+            }
+        ],
     )
     return resp.choices[0].message.content or ""
 

@@ -6,10 +6,10 @@ from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 
-from app.chroma.bm25_index import build_bm25_index, _tokenize
+from app.chroma.bm25_index import _tokenize, build_bm25_index
 from app.chroma.rrf import rrf_merge
-from common.reranker import rerank
 from common.query_expansion import expand_query
+from common.reranker import rerank
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -59,9 +59,9 @@ def _retrieve(query: str) -> tuple[str, list[Document]]:
         # BM25
         query_tokens = _tokenize(sub_q)
         bm25_scores = bm25.get_scores(query_tokens)
-        top_indices = sorted(
-            range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
-        )[:BM25_K]
+        top_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[
+            :BM25_K
+        ]
         all_bm25_docs.extend(all_docs[i] for i in top_indices)
 
     # 去重 + RRF 融合
@@ -73,8 +73,7 @@ def _retrieve(query: str) -> tuple[str, list[Document]]:
     reranked = rerank(query, merged, top_n=RERANK_TOP_K)
 
     serialized = "\n\n".join(
-        f"Source: {doc.metadata}\nContent: {doc.page_content}"
-        for doc in reranked
+        f"Source: {doc.metadata}\nContent: {doc.page_content}" for doc in reranked
     )
     return serialized, reranked
 

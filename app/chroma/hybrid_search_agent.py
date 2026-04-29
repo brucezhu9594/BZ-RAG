@@ -1,13 +1,13 @@
 import os
 
 from dotenv import load_dotenv
-from langchain.tools import tool
 from langchain.agents import create_agent
-from langchain_community.embeddings import ZhipuAIEmbeddings
+from langchain.tools import tool
 from langchain_chroma import Chroma
+from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 
-from app.chroma.bm25_index import build_bm25_index, _tokenize
+from app.chroma.bm25_index import _tokenize, build_bm25_index
 from app.chroma.rrf import rrf_merge
 
 load_dotenv()
@@ -36,9 +36,9 @@ def retrieve_context(query: str):
     bm25, all_docs = build_bm25_index(vector_store)
     query_tokens = _tokenize(query)
     bm25_scores = bm25.get_scores(query_tokens)
-    top_indices = sorted(
-        range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True
-    )[:BM25_K]
+    top_indices = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)[
+        :BM25_K
+    ]
     bm25_docs = [all_docs[i] for i in top_indices]
     print(f"bm25_docs: {bm25_docs}")
 
@@ -47,8 +47,7 @@ def retrieve_context(query: str):
     print(f"merged docs: {merged}")
 
     serialized = "\n\n".join(
-        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}"
-        for doc in merged
+        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}" for doc in merged
     )
     return serialized, merged
 

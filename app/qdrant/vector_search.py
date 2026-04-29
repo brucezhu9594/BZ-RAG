@@ -26,8 +26,7 @@ def _retrieve(query: str) -> tuple[str, list]:
     vector_store = _get_vector_store()
     results = vector_store.similarity_search(query, k=2)
     serialized = "\n\n".join(
-        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}"
-        for doc in results
+        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}" for doc in results
     )
     return serialized, results
 

@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
-from pymilvus import MilvusClient, AnnSearchRequest, RRFRanker
+from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
-from common.zhipu_rerank import rerank
 from common.contextual_rewriter import contextual_rewrite
+from common.zhipu_rerank import rerank
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -72,8 +72,7 @@ def _retrieve(query: str, history: list[dict] | None = None) -> tuple[str, list[
     reranked = rerank(query, candidates, top_n=RERANK_TOP_K)
 
     serialized = "\n\n".join(
-        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}"
-        for doc in reranked
+        f"Source: {doc.metadata.get('source', '')}\nContent: {doc.page_content}" for doc in reranked
     )
     return serialized, reranked
 
@@ -109,7 +108,7 @@ def main():
             continue
 
         # 滑动窗口：只保留最近 N 轮（每轮 = 1条user + 1条assistant = 2条）
-        recent_history = history[-(MAX_HISTORY_ROUNDS * 2):]
+        recent_history = history[-(MAX_HISTORY_ROUNDS * 2) :]
 
         answer = rag(user_input, recent_history)
         print(f"AI: {answer}")
