@@ -1,0 +1,13 @@
+name = "bz-rag-router"
+main = "src/index.js"
+compatibility_date = "2026-04-01"
+account_id = "f44e8a8ed70a6bfd863015750b19e7fd"
+workers_dev = true
+
+[vars]
+STABLE_URL = "https://bz-rag-stable-production.up.railway.app"
+CANARY_URL = "https://bz-rag-canary-production.up.railway.app"
+
+[[kv_namespaces]]
+binding = "BZ_RAG_CANARY"
+id = "2e5e4f27a0b144fc85798611b3863625"
