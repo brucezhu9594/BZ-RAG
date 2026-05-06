@@ -1,5 +1,6 @@
 .env
 app/chroma/db
+/db
 .claude
 app/test.py
 .idea
