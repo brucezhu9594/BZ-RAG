@@ -1,0 +1,25 @@
+name: Rollback Canary
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Zero canary weight
+        run: |
+          chmod +x ./scripts/cf-kv-update.sh
+          ./scripts/cf-kv-update.sh 0
+          echo "Canary traffic 已经移除（新请求全部去 stable）"
+          echo "已经在 canary 上的连接会自然结束（KV 模式没有强制切断）"

@@ -1,0 +1,120 @@
+name: Promote Stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to promote (e.g. 1.2.0)"
+        required: true
+        type: string
+
+# 跟 canary-deploy 共享同一个互斥锁
+concurrency:
+  group: canary-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      KV_NAMESPACE_ID: ${{ secrets.KV_NAMESPACE_ID }}
+    steps:
+      - name: Checkout at release tag
+        uses: actions/checkout@v4
+        with:
+          ref: v${{ inputs.version }}
+          fetch-depth: 0
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Set Short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      # Step 1: 先把 100% 流量切到 canary，stable 这时候没有流量可以放心更新
+      - name: Shift all traffic to canary
+        run: |
+          chmod +x ./scripts/cf-kv-update.sh
+          ./scripts/cf-kv-update.sh 100
+
+      # Step 2: 给 stable service 打上新版本号
+      - name: Set APP_VERSION on stable service
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway variable set APP_VERSION="v${{ inputs.version }}" \
+            -s "${{ secrets.RAILWAY_SERVICE_ID_STABLE }}" \
+            -e "${{ secrets.RAILWAY_ENVIRONMENT_ID }}" \
+            --skip-deploys
+
+      # Step 3: 部署新版本到 stable（此时 stable 没有外部流量打进来）
+      - name: Deploy stable
+        timeout-minutes: 15
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          VERSION="v${{ inputs.version }}"
+          DEPLOY_MESSAGE="Deploy stable ${VERSION} (${SHA}) by ${ACTOR}"
+
+          echo "Deploying ${VERSION} to stable..."
+
+          railway up \
+            -p "${{ secrets.RAILWAY_PROJECT_ID }}" \
+            -s "${{ secrets.RAILWAY_SERVICE_ID_STABLE }}" \
+            -e "${{ secrets.RAILWAY_ENVIRONMENT_ID }}" \
+            -m "${DEPLOY_MESSAGE}" \
+            --ci \
+            --json > deploy.log 2>&1 &
+          RAILWAY_PID=$!
+
+          FAIL_PATTERN="canceled|failed to solve|context canceled|Deploy failed|no changes detected"
+          SUCCESS_PATTERN='"status":\s*"(SUCCESS|success)"'
+          while kill -0 "$RAILWAY_PID" 2>/dev/null; do
+            if grep -qiE "$FAIL_PATTERN" deploy.log 2>/dev/null; then
+              echo "ERROR: Railway build failed or was skipped!"
+              cat deploy.log
+              kill "$RAILWAY_PID" 2>/dev/null || true
+              exit 1
+            fi
+            if grep -qE "$SUCCESS_PATTERN" deploy.log 2>/dev/null; then
+              echo "Railway deploy succeeded."
+              kill "$RAILWAY_PID" 2>/dev/null || true
+              break
+            fi
+            sleep 2
+          done
+
+          wait "$RAILWAY_PID" 2>/dev/null || true
+          cat deploy.log
+
+          if grep -qiE "$FAIL_PATTERN" deploy.log; then
+            echo "ERROR: Railway build failed or was skipped!"
+            exit 1
+          fi
+
+          echo "Stable deployment submitted successfully."
+
+      # Step 4: 验证 stable 起来了 + 跑的是新版本
+      - name: Wait for stable health
+        timeout-minutes: 5
+        run: |
+          chmod +x ./scripts/wait-for-health.sh
+          ./scripts/wait-for-health.sh \
+            "https://bz-rag-stable-production.up.railway.app/api/health" \
+            "${{ inputs.version }}" \
+            240
+
+      # Step 5: 流量全部回到 stable（canary 闲置，等下次 canary-deploy 拉新版本）
+      - name: Route all traffic back to stable
+        run: |
+          chmod +x ./scripts/cf-kv-update.sh
+          ./scripts/cf-kv-update.sh 0
