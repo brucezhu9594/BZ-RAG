@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.0.0...v1.0.1) (2026-05-08)
+
+
+### Bug Fixes
+
+* **build:** 改用 CPU 版 torch 避免 Railway 构建 OOM ([dff58ab](https://github.com/brucezhu9594/BZ-RAG/commit/dff58abddfc39f40df393576ec1fe2acb21fd39e))
+
 # 1.0.0 (2026-05-07)
 
 
