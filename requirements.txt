@@ -1,3 +1,6 @@
+# 用 PyTorch CPU 版本：Railway 没有 GPU，CUDA 依赖白白多 400MB 和 build OOM 风险
+--extra-index-url https://download.pytorch.org/whl/cpu
+
 beautifulsoup4
 python-dotenv
 fastapi
