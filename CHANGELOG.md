@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.0.1...v1.1.0) (2026-05-25)
+
+
+### Features
+
+* lancedb ([71cbeb3](https://github.com/brucezhu9594/BZ-RAG/commit/71cbeb3d23a130f45e7159795aa38826742f4feb))
+
 ## [1.0.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.0.0...v1.0.1) (2026-05-08)
 
 
