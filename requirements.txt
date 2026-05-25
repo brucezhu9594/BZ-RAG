@@ -16,6 +16,8 @@ langchain-text-splitters
 langchain-milvus
 pymilvus
 qdrant-client
+lancedb
+pyarrow
 rank-bm25
 requests
 torch
