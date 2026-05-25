@@ -24,6 +24,7 @@ torch
 transformers
 zhipuai
 zai-sdk
+deepeval
 lxml
 
 # 安全约束：修复传递依赖中的已知漏洞
