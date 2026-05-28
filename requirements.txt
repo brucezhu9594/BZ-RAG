@@ -25,6 +25,7 @@ transformers
 zhipuai
 zai-sdk
 deepeval
+langfuse
 lxml
 
 # 安全约束：修复传递依赖中的已知漏洞
