@@ -8,6 +8,7 @@ from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
 from common.contextual_rewriter import contextual_rewrite
 from common.zhipu_rerank import rerank
+from langfuse import observe
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -23,6 +24,7 @@ RRF_K = 60
 MAX_HISTORY_ROUNDS = 3  # 保留最近 N 轮对话
 
 
+@observe(as_type="retriever")
 def _retrieve(query: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
     # 历史感知查询改写
     rewritten = contextual_rewrite(query, history or [])
