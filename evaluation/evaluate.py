@@ -1,14 +1,15 @@
-"""BZ-RAG 评测入口：用 deepeval 评测 milvus_hybrid 方案。"""
-import json
+"""BZ-RAG 评测入口：拉 Langfuse dataset，回放 pipeline 产生 trace，DeepEval 评测后上 Confident AI。"""
 import os
 import pathlib
 import sys
+from datetime import datetime, timezone
 
 PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parents[1])
 sys.path.insert(0, PROJECT_ROOT)
 
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from langfuse import Langfuse, observe
 
 from deepeval import evaluate
 from deepeval.metrics import (
@@ -19,15 +20,14 @@ from deepeval.metrics import (
 )
 from deepeval.test_case import LLMTestCase
 
+from evaluation.build_dataset import DATASET_NAME
 from evaluation.deepeval_judge import MiniMaxJudge
 
 load_dotenv()
 
-DATASET_PATH = pathlib.Path(__file__).parent / "test_dataset.json"
 
-
+@observe(as_type="generation")
 def generate_answer(query: str, context: str) -> str:
-    """与 hybrid_search.rag 等价的回答生成（不带 history）。"""
     llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=0.7, request_timeout=60)
     system = (
         "你是一个知识库检索助手。"
@@ -44,29 +44,27 @@ def generate_answer(query: str, context: str) -> str:
     return msg.content or ""
 
 
-def build_test_cases(dataset: list[dict]) -> list[LLMTestCase]:
+def build_test_cases(dataset, run_name: str) -> list[LLMTestCase]:
     from app.milvus.hybrid_search import _retrieve
 
     cases: list[LLMTestCase] = []
-    for i, item in enumerate(dataset):
-        q = item["question"]
-        print(f"[{i + 1}/{len(dataset)}] 构建样本: {q}")
+    for i, item in enumerate(dataset.items):
+        question = item.input
+        print(f"[{i + 1}/{len(dataset.items)}] 回放: {question}")
         try:
-            _, docs = _retrieve(q)
+            with item.observe(run_name=run_name) as trace:
+                _, docs = _retrieve(question)
+                ctx = [d.page_content for d in docs]
+                ans = generate_answer(question, "\n\n".join(ctx))
+                trace.update(output=ans)
         except Exception as e:
-            print(f"  检索失败，跳过: {e}", file=sys.stderr)
-            continue
-        ctx = [d.page_content for d in docs]
-        try:
-            ans = generate_answer(q, "\n\n".join(ctx))
-        except Exception as e:
-            print(f"  生成失败，跳过: {e}", file=sys.stderr)
+            print(f"  pipeline 抛错，跳过: {e}", file=sys.stderr)
             continue
         cases.append(
             LLMTestCase(
-                input=q,
+                input=question,
                 actual_output=ans,
-                expected_output=item["ground_truth"],
+                expected_output=item.expected_output,
                 retrieval_context=ctx,
             )
         )
@@ -74,8 +72,19 @@ def build_test_cases(dataset: list[dict]) -> list[LLMTestCase]:
 
 
 def main() -> None:
-    with open(DATASET_PATH, encoding="utf-8") as f:
-        dataset = json.load(f)
+    langfuse = Langfuse()
+    try:
+        dataset = langfuse.get_dataset(DATASET_NAME)
+    except Exception as e:
+        print(
+            f"无法获取 Langfuse dataset {DATASET_NAME!r}: {e}\n"
+            f"请先跑: python evaluation/build_dataset.py",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    run_name = f"deepeval-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    print(f"评测 run: {run_name}")
 
     judge = MiniMaxJudge()
     metrics = [
@@ -91,12 +100,14 @@ def main() -> None:
             "如需云端报告：deepeval login --confident-api-key=<key>"
         )
 
-    test_cases = build_test_cases(dataset)
-    if not test_cases:
+    cases = build_test_cases(dataset, run_name)
+    langfuse.flush()
+
+    if not cases:
         print("没有可评测的样本，退出。", file=sys.stderr)
         sys.exit(1)
 
-    evaluate(test_cases=test_cases, metrics=metrics)
+    evaluate(test_cases=cases, metrics=metrics)
 
 
 if __name__ == "__main__":
