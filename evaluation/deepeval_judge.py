@@ -62,11 +62,27 @@ class MiniMaxJudge(DeepEvalBaseLLM):
 
     @staticmethod
     def _extract_json(text: str) -> str:
+        # MiniMax M2.7 等 thinking 模型会在 JSON 前夹 <think>...</think>，先剥掉。
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         try:
             json.loads(text)
             return text
         except Exception:
-            m = re.search(r"\{.*\}", text, re.DOTALL)
-            if m:
-                return m.group(0)
-            raise ValueError(f"无法解析 JSON: {text[:200]}")
+            pass
+        # 兜底：扫描所有平衡 {...} 块，从最后一个开始挑能解析的。
+        candidates = []
+        stack: list[int] = []
+        for i, c in enumerate(text):
+            if c == "{":
+                stack.append(i)
+            elif c == "}" and stack:
+                start = stack.pop()
+                if not stack:
+                    candidates.append(text[start : i + 1])
+        for cand in reversed(candidates):
+            try:
+                json.loads(cand)
+                return cand
+            except Exception:
+                continue
+        raise ValueError(f"无法解析 JSON: {text[:200]}")

@@ -24,6 +24,19 @@ class TestExtractJson:
         with pytest.raises(ValueError, match="无法解析 JSON"):
             MiniMaxJudge._extract_json("纯文本没有 JSON")
 
+    def test_thinking_model_strips_think_block(self):
+        text = (
+            '<think>用户想要 JSON {"foo":"bar"}。我应该返回 {"answer": 1}。</think>\n'
+            '{"answer": 1}'
+        )
+        result = MiniMaxJudge._extract_json(text)
+        assert result == '{"answer": 1}'
+
+    def test_picks_last_balanced_block_when_multiple(self):
+        text = '前缀 {"junk": "x"} 中间 {"truths": ["a"]}'
+        result = MiniMaxJudge._extract_json(text)
+        assert result == '{"truths": ["a"]}'
+
 
 class TestRetryOnRateLimit:
     @staticmethod
