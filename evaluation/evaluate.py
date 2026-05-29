@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parents[1])
 sys.path.insert(0, PROJECT_ROOT)
 
+# 调高 DeepEval per-task 超时（默认 180s），给 MiniMax thinking 模型 + 重试 + 节流留余量。
+os.environ.setdefault("DEEPEVAL_PER_TASK_TIMEOUT_SECONDS_OVERRIDE", "600")
+
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from langfuse import Langfuse, observe
