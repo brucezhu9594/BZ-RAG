@@ -29,7 +29,9 @@ class MiniMaxJudge(DeepEvalBaseLLM):
         return text
 
     async def a_generate(self, prompt: str, schema=None):
-        return self.generate(prompt, schema)
+        import asyncio
+
+        return await asyncio.to_thread(self.generate, prompt, schema)
 
     def get_model_name(self) -> str:
         return f"MiniMax({os.environ['MODEL_ID']})"
