@@ -26,6 +26,7 @@ zhipuai
 zai-sdk
 deepeval
 langfuse
+json_repair
 lxml
 
 # 安全约束：修复传递依赖中的已知漏洞

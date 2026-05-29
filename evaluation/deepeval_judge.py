@@ -5,6 +5,7 @@ import os
 import re
 
 from deepeval.models import DeepEvalBaseLLM
+from json_repair import repair_json
 from langchain_openai import ChatOpenAI
 from openai import APIError, RateLimitError
 from tenacity import (
@@ -85,4 +86,12 @@ class MiniMaxJudge(DeepEvalBaseLLM):
                 return cand
             except Exception:
                 continue
+        # 最后兜底：json_repair 修复未转义引号等常见 LLM 输出问题。
+        repaired = repair_json(text)
+        if repaired and repaired != '""':
+            try:
+                json.loads(repaired)
+                return repaired
+            except Exception:
+                pass
         raise ValueError(f"无法解析 JSON: {text[:200]}")

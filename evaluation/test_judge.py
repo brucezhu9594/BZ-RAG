@@ -37,6 +37,15 @@ class TestExtractJson:
         result = MiniMaxJudge._extract_json(text)
         assert result == '{"truths": ["a"]}'
 
+    def test_repairs_broken_json_with_unescaped_quotes(self):
+        # MiniMax M2.7 实际产出过这种 reason 里嵌未转义引号的 broken JSON。
+        text = '```json\n{\n  "reason": "score 0 because node says "禾蛙" without details"\n}\n```'
+        result = MiniMaxJudge._extract_json(text)
+        import json as _json
+        parsed = _json.loads(result)
+        assert "reason" in parsed
+        assert "禾蛙" in parsed["reason"]
+
 
 class TestRetryOnRateLimit:
     @staticmethod
