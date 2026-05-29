@@ -70,14 +70,14 @@
 追加 `langfuse`，不锁版本（与项目其它依赖风格一致）。
 
 ### 2. `app/milvus/hybrid_search.py`（modify）
-最小侵入：仅在 `_retrieve(query, history=None)` 函数上加 `@observe(as_type="retrieval")`。其它函数（`rag`、`main`）不动。
+最小侵入：仅在 `_retrieve(query, history=None)` 函数上加 `@observe(as_type="retriever")`。其它函数（`rag`、`main`）不动。
 - `rag()` 仍带 history，是交互式 CLI 入口，不参与评测。
 - 评测专用的 `generate_answer` 放在 `evaluation/evaluate.py`，那里自己拿 `@observe`。
 
 ```python
 from langfuse import observe   # 顶部加 import
 
-@observe(as_type="retrieval")
+@observe(as_type="retriever")
 def _retrieve(query: str, history: list[dict] | None = None) -> tuple[str, list[dict]]:
     ...  # 原有实现不动
 ```
