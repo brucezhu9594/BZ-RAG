@@ -12,6 +12,7 @@ from langchain_openai import ChatOpenAI
 from langfuse import Langfuse, observe
 
 from deepeval import evaluate
+from deepeval.evaluate import DisplayConfig
 from deepeval.metrics import (
     AnswerRelevancyMetric,
     ContextualPrecisionMetric,
@@ -128,7 +129,12 @@ def main() -> None:
         print("没有可评测的样本，退出。", file=sys.stderr)
         sys.exit(1)
 
-    evaluate(test_cases=cases, metrics=metrics)
+    # show_indicator=False avoids rich console emoji rendering crash on Windows GBK terminals.
+    evaluate(
+        test_cases=cases,
+        metrics=metrics,
+        display_config=DisplayConfig(show_indicator=False),
+    )
 
 
 if __name__ == "__main__":
