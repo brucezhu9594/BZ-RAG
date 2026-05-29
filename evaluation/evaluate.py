@@ -1,4 +1,4 @@
-"""BZ-RAG 评测入口：拉 Langfuse dataset，回放 pipeline 产生 trace，DeepEval 评测后上 Confident AI。"""
+"""BZ-RAG 评测入口：用 Langfuse run_experiment 跑 milvus_hybrid pipeline 产生 trace，DeepEval 评测后上 Confident AI。"""
 import os
 import pathlib
 import sys
@@ -44,33 +44,6 @@ def generate_answer(query: str, context: str) -> str:
     return msg.content or ""
 
 
-def build_test_cases(dataset, run_name: str) -> list[LLMTestCase]:
-    from app.milvus.hybrid_search import _retrieve
-
-    cases: list[LLMTestCase] = []
-    for i, item in enumerate(dataset.items):
-        question = item.input
-        print(f"[{i + 1}/{len(dataset.items)}] 回放: {question}")
-        try:
-            with item.observe(run_name=run_name) as trace:
-                _, docs = _retrieve(question)
-                ctx = [d.page_content for d in docs]
-                ans = generate_answer(question, "\n\n".join(ctx))
-                trace.update(output=ans)
-        except Exception as e:
-            print(f"  pipeline 抛错，跳过: {e}", file=sys.stderr)
-            continue
-        cases.append(
-            LLMTestCase(
-                input=question,
-                actual_output=ans,
-                expected_output=item.expected_output,
-                retrieval_context=ctx,
-            )
-        )
-    return cases
-
-
 def main() -> None:
     langfuse = Langfuse()
     try:
@@ -100,8 +73,56 @@ def main() -> None:
             "如需云端报告：deepeval login --confident-api-key=<key>"
         )
 
-    cases = build_test_cases(dataset, run_name)
+    # Side-channel collection of (input, output, retrieval_context) per item
+    # so DeepEval can evaluate after the experiment finishes.
+    collected: list[dict] = []
+
+    from app.milvus.hybrid_search import _retrieve
+
+    def task(*, item, **kwargs):
+        """Pipeline runner. run_experiment passes DatasetItem via keyword arg 'item'."""
+        question = item.input
+        expected = item.expected_output
+
+        print(f"  pipeline: {question}")
+        _, docs = _retrieve(question)
+        ctx = [d.page_content for d in docs]
+        ans = generate_answer(question, "\n\n".join(ctx))
+        collected.append(
+            {
+                "input": question,
+                "actual_output": ans,
+                "expected_output": expected,
+                "retrieval_context": ctx,
+            }
+        )
+        return ans
+
+    # Run experiment — Langfuse handles tracing and dataset run linkage.
+    # Pass evaluators=[] because we use DeepEval as a separate pass after.
+    dataset.run_experiment(
+        name=run_name,
+        run_name=run_name,
+        task=task,
+        evaluators=[],
+    )
+
     langfuse.flush()
+
+    # Build DeepEval cases from collected side data.
+    cases: list[LLMTestCase] = []
+    for c in collected:
+        if c["expected_output"] is None:
+            # Skip items without expected output
+            continue
+        cases.append(
+            LLMTestCase(
+                input=c["input"],
+                actual_output=c["actual_output"],
+                expected_output=c["expected_output"],
+                retrieval_context=c["retrieval_context"],
+            )
+        )
 
     if not cases:
         print("没有可评测的样本，退出。", file=sys.stderr)
