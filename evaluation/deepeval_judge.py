@@ -1,10 +1,30 @@
 """把 MiniMax 包装成 deepeval 可用的 Judge LLM。"""
+import asyncio
 import json
 import os
 import re
 
 from deepeval.models import DeepEvalBaseLLM
 from langchain_openai import ChatOpenAI
+from openai import APIError, RateLimitError
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+)
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    if isinstance(exc, RateLimitError):
+        return True
+    if isinstance(exc, APIError):
+        status = getattr(exc, "status_code", None) or getattr(
+            getattr(exc, "response", None), "status_code", None
+        )
+        if status == 429:
+            return True
+    return False
 
 
 class MiniMaxJudge(DeepEvalBaseLLM):
@@ -21,6 +41,12 @@ class MiniMaxJudge(DeepEvalBaseLLM):
     def load_model(self):
         return self._model
 
+    @retry(
+        retry=retry_if_exception(_is_rate_limit),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        stop=stop_after_attempt(6),
+        reraise=True,
+    )
     def generate(self, prompt: str, schema=None):
         msg = self._model.invoke([{"role": "user", "content": prompt}])
         text = msg.content or ""
@@ -29,8 +55,6 @@ class MiniMaxJudge(DeepEvalBaseLLM):
         return text
 
     async def a_generate(self, prompt: str, schema=None):
-        import asyncio
-
         return await asyncio.to_thread(self.generate, prompt, schema)
 
     def get_model_name(self) -> str:

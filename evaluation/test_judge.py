@@ -23,3 +23,82 @@ class TestExtractJson:
     def test_no_json_raises(self):
         with pytest.raises(ValueError, match="无法解析 JSON"):
             MiniMaxJudge._extract_json("纯文本没有 JSON")
+
+
+class TestRetryOnRateLimit:
+    @staticmethod
+    def _make_rate_limit_err():
+        """Build a minimal openai.RateLimitError without a real httpx.Response."""
+        from unittest.mock import MagicMock
+        from openai import RateLimitError
+
+        fake_response = MagicMock()
+        fake_response.status_code = 429
+        fake_response.request = MagicMock()
+        return RateLimitError(message="429", response=fake_response, body=None)
+
+    def test_retries_on_rate_limit_then_succeeds(self, monkeypatch):
+        """When _model.invoke raises RateLimitError twice then succeeds, generate() should retry and return final content."""
+        import os
+        os.environ.setdefault("MODEL_ID", "test")
+        os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
+        os.environ.setdefault("OPENAI_API_KEY", "test")
+
+        from evaluation.deepeval_judge import MiniMaxJudge
+        from unittest.mock import MagicMock
+
+        judge = MiniMaxJudge()
+        err = self._make_rate_limit_err()
+
+        success_msg = MagicMock()
+        success_msg.content = '{"ok": 1}'
+
+        calls = {"count": 0}
+        side_effects = [err, err, success_msg]
+
+        def fake_invoke(self_inner, *args, **kwargs):
+            result = side_effects[calls["count"]]
+            calls["count"] += 1
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        # ChatOpenAI is a Pydantic model — patch at the class level, not instance level.
+        monkeypatch.setattr(type(judge._model), "invoke", fake_invoke)
+
+        # Speed up the retry waits to keep the test fast.
+        import tenacity
+        monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
+
+        out = judge.generate("hi")
+        assert out == '{"ok": 1}'
+        assert calls["count"] == 3
+
+    def test_retries_exhausted_raises(self, monkeypatch):
+        """When _model.invoke always rate-limits, generate() should give up after max attempts and re-raise."""
+        import os
+        os.environ.setdefault("MODEL_ID", "test")
+        os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
+        os.environ.setdefault("OPENAI_API_KEY", "test")
+
+        from evaluation.deepeval_judge import MiniMaxJudge
+        from openai import RateLimitError
+
+        judge = MiniMaxJudge()
+        err = self._make_rate_limit_err()
+
+        calls = {"count": 0}
+
+        def fake_invoke(self_inner, *args, **kwargs):
+            calls["count"] += 1
+            raise err
+
+        monkeypatch.setattr(type(judge._model), "invoke", fake_invoke)
+
+        import tenacity
+        monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
+
+        with pytest.raises(RateLimitError):
+            judge.generate("hi")
+        # Max attempts is 6 per the spec.
+        assert calls["count"] == 6
