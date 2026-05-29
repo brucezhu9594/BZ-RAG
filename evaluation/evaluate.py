@@ -86,9 +86,13 @@ def main() -> None:
         expected = item.expected_output
 
         print(f"  pipeline: {question}")
-        _, docs = _retrieve(question)
-        ctx = [d.page_content for d in docs]
-        ans = generate_answer(question, "\n\n".join(ctx))
+        try:
+            _, docs = _retrieve(question)
+            ctx = [d.page_content for d in docs]
+            ans = generate_answer(question, "\n\n".join(ctx))
+        except Exception as e:
+            print(f"  pipeline 抛错，跳过: {e}", file=sys.stderr)
+            return None
         collected.append(
             {
                 "input": question,
@@ -100,12 +104,14 @@ def main() -> None:
         return ans
 
     # Run experiment — Langfuse handles tracing and dataset run linkage.
-    # Pass evaluators=[] because we use DeepEval as a separate pass after.
+    # max_concurrency=1 avoids rate-limit (429) bursts on MiniMax API.
+    # evaluators=[] because we use DeepEval as a separate pass after.
     dataset.run_experiment(
         name=run_name,
         run_name=run_name,
         task=task,
         evaluators=[],
+        max_concurrency=1,
     )
 
     langfuse.flush()
