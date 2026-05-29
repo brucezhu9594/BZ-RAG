@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langfuse import Langfuse, observe
 
 from deepeval import evaluate
-from deepeval.evaluate import DisplayConfig
+from deepeval.evaluate import AsyncConfig, DisplayConfig
 from deepeval.metrics import (
     AnswerRelevancyMetric,
     ContextualPrecisionMetric,
@@ -136,10 +136,12 @@ def main() -> None:
         sys.exit(1)
 
     # show_indicator=False avoids rich console emoji rendering crash on Windows GBK terminals.
+    # max_concurrent=1 + throttle_value=1.0 prevent concurrent LLM calls that trigger MiniMax 429s.
     evaluate(
         test_cases=cases,
         metrics=metrics,
         display_config=DisplayConfig(show_indicator=False),
+        async_config=AsyncConfig(run_async=True, max_concurrent=1, throttle_value=1.0),
     )
 
 
