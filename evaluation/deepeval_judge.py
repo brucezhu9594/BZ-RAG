@@ -1,4 +1,4 @@
-"""把 MiniMax 包装成 deepeval 可用的 Judge LLM。"""
+"""把 OpenAI 兼容 LLM（默认智谱 GLM）包装成 deepeval 可用的 Judge LLM。"""
 import asyncio
 import json
 import os
@@ -28,7 +28,7 @@ def _is_rate_limit(exc: BaseException) -> bool:
     return False
 
 
-class MiniMaxJudge(DeepEvalBaseLLM):
+class GLMJudge(DeepEvalBaseLLM):
     def __init__(self):
         self._model = ChatOpenAI(
             model=os.environ["MODEL_ID"],
@@ -59,11 +59,11 @@ class MiniMaxJudge(DeepEvalBaseLLM):
         return await asyncio.to_thread(self.generate, prompt, schema)
 
     def get_model_name(self) -> str:
-        return f"MiniMax({os.environ['MODEL_ID']})"
+        return f"GLM({os.environ['MODEL_ID']})"
 
     @staticmethod
     def _extract_json(text: str) -> str:
-        # MiniMax M2.7 等 thinking 模型会在 JSON 前夹 <think>...</think>，先剥掉。
+        # 部分 thinking 模型会在 JSON 前夹 <think>...</think>，先剥掉。
         text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
         try:
             json.loads(text)

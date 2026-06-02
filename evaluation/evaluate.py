@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 PROJECT_ROOT = str(pathlib.Path(__file__).resolve().parents[1])
 sys.path.insert(0, PROJECT_ROOT)
 
-# 调高 DeepEval per-task 超时（默认 180s），给 MiniMax thinking 模型 + 重试 + 节流留余量。
+# 调高 DeepEval per-task 超时（默认 180s），给 LLM judge + 重试 + 节流留余量。
 os.environ.setdefault("DEEPEVAL_PER_TASK_TIMEOUT_SECONDS_OVERRIDE", "600")
 
 from dotenv import load_dotenv
@@ -25,7 +25,7 @@ from deepeval.metrics import (
 from deepeval.test_case import LLMTestCase
 
 from evaluation.build_dataset import DATASET_NAME
-from evaluation.deepeval_judge import MiniMaxJudge
+from evaluation.deepeval_judge import GLMJudge
 
 load_dotenv()
 
@@ -63,7 +63,7 @@ def main() -> None:
     run_name = f"deepeval-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
     print(f"评测 run: {run_name}")
 
-    judge = MiniMaxJudge()
+    judge = GLMJudge()
     metrics = [
         FaithfulnessMetric(model=judge, threshold=0.7),
         AnswerRelevancyMetric(model=judge, threshold=0.7),
@@ -107,7 +107,7 @@ def main() -> None:
         return ans
 
     # Run experiment — Langfuse handles tracing and dataset run linkage.
-    # max_concurrency=1 avoids rate-limit (429) bursts on MiniMax API.
+    # max_concurrency=1 avoids rate-limit (429) bursts on LLM API.
     # evaluators=[] because we use DeepEval as a separate pass after.
     dataset.run_experiment(
         name=run_name,
@@ -139,7 +139,7 @@ def main() -> None:
         sys.exit(1)
 
     # show_indicator=False avoids rich console emoji rendering crash on Windows GBK terminals.
-    # max_concurrent=1 + throttle_value=1.0 prevent concurrent LLM calls that trigger MiniMax 429s.
+    # max_concurrent=1 + throttle_value=1.0 prevent concurrent LLM calls that trigger 429s.
     evaluate(
         test_cases=cases,
         metrics=metrics,

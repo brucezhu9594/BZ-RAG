@@ -1,46 +1,46 @@
 """evaluation/deepeval_judge.py 中 JSON 提取工具的单元测试。"""
 import pytest
 
-from evaluation.deepeval_judge import MiniMaxJudge
+from evaluation.deepeval_judge import GLMJudge
 
 
 class TestExtractJson:
     def test_pure_json_passthrough(self):
         text = '{"score": 0.9, "reason": "ok"}'
-        assert MiniMaxJudge._extract_json(text) == text
+        assert GLMJudge._extract_json(text) == text
 
     def test_markdown_wrapped_json(self):
         text = '```json\n{"a": 1}\n```'
-        result = MiniMaxJudge._extract_json(text)
+        result = GLMJudge._extract_json(text)
         assert result.strip().startswith("{")
         assert '"a": 1' in result
 
     def test_prose_with_embedded_json(self):
         text = '好的，评分如下：{"score": 0.5}\n仅供参考。'
-        result = MiniMaxJudge._extract_json(text)
+        result = GLMJudge._extract_json(text)
         assert result == '{"score": 0.5}'
 
     def test_no_json_raises(self):
         with pytest.raises(ValueError, match="无法解析 JSON"):
-            MiniMaxJudge._extract_json("纯文本没有 JSON")
+            GLMJudge._extract_json("纯文本没有 JSON")
 
     def test_thinking_model_strips_think_block(self):
         text = (
             '<think>用户想要 JSON {"foo":"bar"}。我应该返回 {"answer": 1}。</think>\n'
             '{"answer": 1}'
         )
-        result = MiniMaxJudge._extract_json(text)
+        result = GLMJudge._extract_json(text)
         assert result == '{"answer": 1}'
 
     def test_picks_last_balanced_block_when_multiple(self):
         text = '前缀 {"junk": "x"} 中间 {"truths": ["a"]}'
-        result = MiniMaxJudge._extract_json(text)
+        result = GLMJudge._extract_json(text)
         assert result == '{"truths": ["a"]}'
 
     def test_repairs_broken_json_with_unescaped_quotes(self):
-        # MiniMax M2.7 实际产出过这种 reason 里嵌未转义引号的 broken JSON。
+        # 部分 thinking 模型实际产出过这种 reason 里嵌未转义引号的 broken JSON。
         text = '```json\n{\n  "reason": "score 0 because node says "禾蛙" without details"\n}\n```'
-        result = MiniMaxJudge._extract_json(text)
+        result = GLMJudge._extract_json(text)
         import json as _json
         parsed = _json.loads(result)
         assert "reason" in parsed
@@ -66,10 +66,10 @@ class TestRetryOnRateLimit:
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
 
-        from evaluation.deepeval_judge import MiniMaxJudge
+        from evaluation.deepeval_judge import GLMJudge
         from unittest.mock import MagicMock
 
-        judge = MiniMaxJudge()
+        judge = GLMJudge()
         err = self._make_rate_limit_err()
 
         success_msg = MagicMock()
@@ -103,10 +103,10 @@ class TestRetryOnRateLimit:
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
 
-        from evaluation.deepeval_judge import MiniMaxJudge
+        from evaluation.deepeval_judge import GLMJudge
         from openai import RateLimitError
 
-        judge = MiniMaxJudge()
+        judge = GLMJudge()
         err = self._make_rate_limit_err()
 
         calls = {"count": 0}
