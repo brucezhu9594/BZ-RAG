@@ -165,5 +165,5 @@ class TestRetryOnRateLimit:
 
         with pytest.raises(RateLimitError):
             judge.generate("hi")
-        # Max attempts is 6 per the spec.
-        assert calls["count"] == 6
+        # Max attempts is 4 (tightened so retry 总时长不撞 DeepEval per-task 超时).
+        assert calls["count"] == 4

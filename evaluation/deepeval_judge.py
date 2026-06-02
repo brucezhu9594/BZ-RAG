@@ -42,7 +42,7 @@ class GLMJudge(DeepEvalBaseLLM):
             base_url=os.environ["OPENAI_BASE_URL"],
             api_key=os.environ["OPENAI_API_KEY"],
             temperature=0,
-            request_timeout=60,
+            request_timeout=45,
             model_kwargs={"response_format": {"type": "json_object"}},
         )
 
@@ -51,8 +51,8 @@ class GLMJudge(DeepEvalBaseLLM):
 
     @retry(
         retry=retry_if_exception(_is_retryable),
-        wait=wait_exponential(multiplier=1, min=2, max=30),
-        stop=stop_after_attempt(6),
+        wait=wait_exponential(multiplier=1, min=2, max=12),
+        stop=stop_after_attempt(4),
         reraise=True,
     )
     def generate(self, prompt: str, schema=None):
