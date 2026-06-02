@@ -10,8 +10,11 @@ sys.path.insert(0, PROJECT_ROOT)
 from dotenv import load_dotenv
 from langfuse import Langfuse
 
-DATASET_NAME = "bz-rag-eval"
-DATASET_DESCRIPTION = "BZ-RAG 评测集，来自 evaluation/test_dataset.json 回放。"
+# v2：黄金集从旧 15 项手写换成 24 项 GLM 生成 + 人工审。
+# Langfuse create_dataset_item 是 upsert（按 input 幂等），换黄金集后 question 全变，
+# 旧 item 不会被覆盖只会并存，因此换新 dataset 名以隔离，旧 bz-rag-eval 作废。
+DATASET_NAME = "bz-rag-eval-v2"
+DATASET_DESCRIPTION = "BZ-RAG 评测集 v2，24 项（GLM-4-Flash 生成 + 人工审），来自 evaluation/test_dataset.json。"
 
 DATASET_PATH = pathlib.Path(__file__).parent / "test_dataset.json"
 
