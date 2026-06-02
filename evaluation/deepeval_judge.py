@@ -7,7 +7,12 @@ import re
 from deepeval.models import DeepEvalBaseLLM
 from json_repair import repair_json
 from langchain_openai import ChatOpenAI
-from openai import APIError, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    RateLimitError,
+)
 from tenacity import (
     retry,
     retry_if_exception,
@@ -16,14 +21,16 @@ from tenacity import (
 )
 
 
-def _is_rate_limit(exc: BaseException) -> bool:
-    if isinstance(exc, RateLimitError):
+def _is_retryable(exc: BaseException) -> bool:
+    # 限流 / 超时 / 连接中断都重试 —— 智谱 GLM 偶发 APITimeoutError，
+    # 不重试会让 DeepEval metric 阶段整轮崩掉。
+    if isinstance(exc, (RateLimitError, APITimeoutError, APIConnectionError)):
         return True
     if isinstance(exc, APIError):
         status = getattr(exc, "status_code", None) or getattr(
             getattr(exc, "response", None), "status_code", None
         )
-        if status == 429:
+        if status in (429, 500, 502, 503, 504):
             return True
     return False
 
@@ -43,7 +50,7 @@ class GLMJudge(DeepEvalBaseLLM):
         return self._model
 
     @retry(
-        retry=retry_if_exception(_is_rate_limit),
+        retry=retry_if_exception(_is_retryable),
         wait=wait_exponential(multiplier=1, min=2, max=30),
         stop=stop_after_attempt(6),
         reraise=True,

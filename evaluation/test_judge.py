@@ -59,6 +59,49 @@ class TestRetryOnRateLimit:
         fake_response.request = MagicMock()
         return RateLimitError(message="429", response=fake_response, body=None)
 
+    @staticmethod
+    def _make_timeout_err():
+        """Build an openai.APITimeoutError."""
+        from unittest.mock import MagicMock
+        from openai import APITimeoutError
+
+        return APITimeoutError(request=MagicMock())
+
+    def test_retries_on_timeout_then_succeeds(self, monkeypatch):
+        """APITimeoutError 应当被重试（智谱 GLM 偶发超时不能让整轮崩）。"""
+        import os
+        os.environ.setdefault("MODEL_ID", "test")
+        os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
+        os.environ.setdefault("OPENAI_API_KEY", "test")
+
+        from evaluation.deepeval_judge import GLMJudge
+        from unittest.mock import MagicMock
+
+        judge = GLMJudge()
+        err = self._make_timeout_err()
+
+        success_msg = MagicMock()
+        success_msg.content = '{"ok": 1}'
+
+        calls = {"count": 0}
+        side_effects = [err, success_msg]
+
+        def fake_invoke(self_inner, *args, **kwargs):
+            result = side_effects[calls["count"]]
+            calls["count"] += 1
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        monkeypatch.setattr(type(judge._model), "invoke", fake_invoke)
+
+        import tenacity
+        monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
+
+        out = judge.generate("hi")
+        assert out == '{"ok": 1}'
+        assert calls["count"] == 2
+
     def test_retries_on_rate_limit_then_succeeds(self, monkeypatch):
         """When _model.invoke raises RateLimitError twice then succeeds, generate() should retry and return final content."""
         import os
