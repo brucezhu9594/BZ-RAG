@@ -119,7 +119,7 @@ class TestRetryOnRateLimit:
         success_msg.content = '{"ok": 1}'
 
         calls = {"count": 0}
-        side_effects = [err, err, success_msg]
+        side_effects = [err, success_msg]
 
         def fake_invoke(self_inner, *args, **kwargs):
             result = side_effects[calls["count"]]
@@ -137,7 +137,7 @@ class TestRetryOnRateLimit:
 
         out = judge.generate("hi")
         assert out == '{"ok": 1}'
-        assert calls["count"] == 3
+        assert calls["count"] == 2
 
     def test_retries_exhausted_raises(self, monkeypatch):
         """When _model.invoke always rate-limits, generate() should give up after max attempts and re-raise."""
@@ -165,5 +165,5 @@ class TestRetryOnRateLimit:
 
         with pytest.raises(RateLimitError):
             judge.generate("hi")
-        # Max attempts is 4 (tightened so retry 总时长不撞 DeepEval per-task 超时).
-        assert calls["count"] == 4
+        # Max attempts is 2 (timeout 拉到 150s，慢请求重试也慢，少试即可).
+        assert calls["count"] == 2
