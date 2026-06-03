@@ -11,7 +11,12 @@ from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
-from deepeval.tracing import observe, update_current_span, update_current_trace
+from deepeval.tracing import (
+    observe,
+    update_current_span,
+    update_current_trace,
+    update_retriever_span,
+)
 
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "hewa_help_collection"
@@ -54,11 +59,13 @@ def _retrieve_span(query: str) -> list[Document]:
         )
         for r in results[0]
     ]
+    # Confident AI 对 retriever span 必填 embedder（embedding 模型名）。
+    update_retriever_span(embedder="embedding-3", top_k=RETRIEVE_TOP_K)
     update_current_span(input=query, retrieval_context=[d.page_content for d in docs])
     return docs
 
 
-@observe(type="retriever")
+@observe(type="tool")
 def _rerank_span(query: str, docs: list[Document]) -> list[Document]:
     from common.zhipu_rerank import rerank
 
