@@ -7,6 +7,13 @@ import os
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
 os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
+# 启动即加载 .env，确保 CONFIDENT_API_KEY 等在 deepeval 首次读取（并缓存）settings 前就位。
+# deepeval tracing 在 import 时即缓存 settings，若 .env 加载过晚会把 CONFIDENT_API_KEY
+# 缓存成 None，导致 tracing 静默禁用、trace 不上报 Confident AI。
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
