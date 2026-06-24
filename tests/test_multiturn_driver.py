@@ -1,5 +1,7 @@
 """测试有状态 predict_fn 包装器：按 session 累积真实历史、键记录、preflight 安全。"""
 
+import pytest
+
 from evaluation.multiturn_driver import make_stateful_predict
 
 
@@ -58,6 +60,7 @@ class TestMakeStatefulPredict:
         predict("Q1", "s")  # 正式
         predict("Q2", "s")
         assert calls[2][2] == [("Q1", "ans:Q1")]  # 仅一条 Q1
+        assert calls[1][2] == []  # 第二次 Q1（preflight 重跑）仍看到空历史
 
     def test_unknown_query_is_graceful(self):
         """query 不在该 session 的 turn 列表里 → 当首轮处理，历史为空，不抛异常。"""
@@ -65,3 +68,8 @@ class TestMakeStatefulPredict:
         predict = make_stateful_predict(_data(("Q1", "s")), _fake_pipeline(calls))
         predict("不存在的问题", "s")
         assert calls == [("不存在的问题", "s", [])]
+
+    def test_duplicate_query_in_session_raises(self):
+        """同会话内重复 query → 构造期 raise ValueError（避免历史穿线静默错位）。"""
+        with pytest.raises(ValueError, match="重复问题"):
+            make_stateful_predict(_data(("Q1", "s"), ("Q1", "s")), _fake_pipeline([]))
