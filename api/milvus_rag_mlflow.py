@@ -17,6 +17,8 @@ from mlflow.entities import Document as MlflowDocument
 from mlflow.entities import SpanType
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
+from api.history_utils import build_chat_messages, build_rewrite_prompt
+
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "hewa_help_collection"
 DENSE_LIMIT = 10
@@ -29,6 +31,15 @@ MLFLOW_EXPERIMENT = os.environ.get("MLFLOW_EXPERIMENT", "bz-rag-milvus")
 
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000"))
 mlflow.set_experiment(MLFLOW_EXPERIMENT)
+
+
+@mlflow.trace(span_type=SpanType.LLM)
+def _rewrite_query_span(query: str, history: list[tuple[str, str]]) -> str:
+    # 用对话历史把指代追问改写成独立问题，供检索用。history 非空才会被调用。
+    # temperature=0：改写要稳定可复现。改写失败（空串）退回原问题兜底。
+    llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=0.0, request_timeout=60)
+    msg = llm.invoke([{"role": "user", "content": build_rewrite_prompt(query, history)}])
+    return (msg.content or "").strip() or query
 
 
 @mlflow.trace(span_type=SpanType.RETRIEVER)
@@ -81,7 +92,7 @@ def _rerank_span(query: str, docs: list[Document]) -> list[Document]:
 
 
 @mlflow.trace(span_type=SpanType.LLM)
-def _generate_span(query: str, context: str) -> str:
+def _generate_span(query: str, context: str, history: list[tuple[str, str]] | None = None) -> str:
     llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=0.7, request_timeout=60)
     system_prompt = (
         "你是一个知识库检索助手。"
@@ -89,23 +100,22 @@ def _generate_span(query: str, context: str) -> str:
         "如果检索结果不足以回答，请明确说明知识库中没有相关信息，不要编造。"
         f"\n\n--- 检索结果 ---\n{context}"
     )
-    msg = llm.invoke(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query},
-        ]
-    )
+    msg = llm.invoke(build_chat_messages(system_prompt, query, history))
     return msg.content or ""
 
 
 @mlflow.trace(name="milvus-hybrid-rag", span_type=SpanType.AGENT)
-def milvus_rag_mlflow_query(query: str, session_id: str | None = None) -> str:
-    # session_id 写入 trace metadata（mlflow.trace.session），多轮评估按它分组对话。
+def milvus_rag_mlflow_query(
+    query: str, session_id: str | None = None, history: list[tuple[str, str]] | None = None
+) -> str:
+    # session_id 写入 trace metadata（mlflow.trace.session），多轮评估按它分组。
     if session_id:
         mlflow.update_current_trace(session_id=session_id)
-    docs = _retrieve_span(query)
-    reranked = _rerank_span(query, docs)
+    # history 非空 → 先把追问改写成独立问题再检索；空则走原路径（向后兼容，不跑 rewrite span）。
+    search_query = _rewrite_query_span(query, history) if history else query
+    docs = _retrieve_span(search_query)
+    reranked = _rerank_span(search_query, docs)
     context = "\n\n".join(
         f"Source: {d.metadata.get('source', '')}\nContent: {d.page_content}" for d in reranked
     )
-    return _generate_span(query, context)
+    return _generate_span(query, context, history)
