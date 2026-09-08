@@ -1,3 +1,19 @@
+# [1.3.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.2.0...v1.3.0) (2026-09-08)
+
+
+### Bug Fixes
+
+* **eval:** 多轮驱动同会话重复 query fail-fast + 测试/文档补强 ([3e2dcc2](https://github.com/brucezhu9594/BZ-RAG/commit/3e2dcc2ba0548d46aa9da7d623115fc663e504df))
+
+
+### Features
+
+* **api:** 多轮历史纯助手 build_rewrite_prompt / build_chat_messages ([9c5dabb](https://github.com/brucezhu9594/BZ-RAG/commit/9c5dabb394a9d5305e9033bca1b397a29c554e1d))
+* **api:** 管线支持多轮——查询改写 + 生成带历史 ([29035f4](https://github.com/brucezhu9594/BZ-RAG/commit/29035f4ff520f3ac95cf01a63d4134f7b7989132))
+* **eval:** MLflow 单轮+多轮评估 baseline(有状态升级前) ([769ef27](https://github.com/brucezhu9594/BZ-RAG/commit/769ef2726e313472097468e11e4e084a16881366))
+* **eval:** MLflow 多轮(session 级)评估 + followup_resolution 指标 ([a3ed79c](https://github.com/brucezhu9594/BZ-RAG/commit/a3ed79c418858469b9fcfb2cc72c4be983f39007))
+* **eval:** 有状态 predict_fn 包装器，按 session 穿线真实历史 ([15be2c2](https://github.com/brucezhu9594/BZ-RAG/commit/15be2c2f9f944708c43f017a21554ad130fa2c42))
+
 # [1.2.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.1.0...v1.2.0) (2026-06-11)
 
 
