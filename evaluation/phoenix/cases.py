@@ -39,7 +39,19 @@ def _load() -> list[Case]:
     ]
 
 
+def smoke_ids(cases: list[Case]) -> frozenset[str]:
+    """按 example_id（内容哈希）排序后取前 SMOKE_SIZE 条。
+
+    PR 上只跑这几条，控制判官调用量；但选取方式必须和本模块的内容寻址原则保持一致——
+    按哈希排序取前 N，而不是按 cases 列表的位置切片取前 N。位置切片会锚在
+    test_dataset.json 的行序上：谁排在文件开头就被选中，和这条 case 的内容毫无关系，
+    也会让"哪三条是 smoke"随文件改一次序就静默变化。哈希排序对输入顺序免疫，
+    且这个排序结果本身就是在数据集上做的一次确定性铺开，不会像文件序那样
+    系统性偏向开头那几条最简单的 case。
+    """
+    return frozenset(sorted(c.example_id for c in cases)[:SMOKE_SIZE])
+
+
 CASES: list[Case] = _load()
 CASE_IDS: list[str] = [c.example_id for c in CASES]
-# smoke 子集：PR 上只跑这几条，控制判官调用量。取前 N 条而不是随机，保证可比。
-SMOKE_IDS: frozenset[str] = frozenset(CASE_IDS[:SMOKE_SIZE])
+SMOKE_IDS: frozenset[str] = smoke_ids(CASES)
