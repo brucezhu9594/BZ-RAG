@@ -21,8 +21,19 @@ Write-Host "UI: http://localhost:6006"
 $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
 
 if ($pythonCmd) {
+    # 注意：不能在 $ErrorActionPreference = "Stop" 生效时直接对原生命令的 stderr
+    # 做 2>$null 重定向——Windows PowerShell 5.1 会把重定向到的每一行 stderr 包成
+    # ErrorRecord（NativeCommandError），Stop 又把它升级成终止性异常，脚本会在这句
+    # 当场炸掉，下面写的友好提示永远走不到（这是本脚本上一轮修复时踩过的真实 bug）。
+    # 这里在探测的这一句局部把 EAP 降回 Continue，让重定向按预期只是丢弃 stderr、
+    # 不触发终止，探测完再恢复成 Stop。
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
     python -c "import phoenix" 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    $moduleExitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prevEap
+
+    if ($moduleExitCode -eq 0) {
         Write-Host "Starting via: python -m phoenix.server.main serve"
         python -m phoenix.server.main serve
         exit $LASTEXITCODE
