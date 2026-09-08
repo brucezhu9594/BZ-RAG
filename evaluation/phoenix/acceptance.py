@@ -6,12 +6,14 @@
   3. 判官报错是第三态（errored），既不算 0 分也不算通过
   4. 结果落库失败只 warn，不影响门禁判定——所以本模块完全不读 Phoenix，只读进程内累加器
 
-补充（Task review Ruling R18）：光靠 min_samples 兜不住"判官大面积报错"这类
-漏判——样本规模一大，min_samples 早就被 usable 记录数盖过去了（比如 48 条
-预期里 40 errored + 8 好，usable=8 照样过关）。所以另外加了一个与规模无关的
-判据 max_error_rate：errored 占比超过阈值直接 FAIL，且这件事无论最终判
-PASS 还是 FAIL 都要在记分卡上无条件可见——不能让"这次绿灯不可信"这件事
-在人看得见的输出里彻底隐形。
+补充（Task review Ruling R18/R22）：光靠 min_samples 兜不住"判官大面积报错"
+这类漏判——样本规模一大，min_samples 早就被 usable 记录数盖过去了（比如
+48 条预期里 40 errored + 8 好，usable=8 照样过关）。所以另外加了一个与规模
+无关的判据 max_error_rate，语义是"绝对下限 1 次 + 超出后按比例"：总是容忍
+1 次判官瞬时失败（任何规模上都是噪声），超出这 1 次之后再按比例判——纯比例
+在 smoke 那种小样本（N=3）上会零容忍，一次偶发超时就红，训练出"红了先重跑"
+的习惯，门禁就废了。且这件事无论最终判 PASS 还是 FAIL 都要在记分卡上无条件
+可见——不能让"这次绿灯不可信"这件事在人看得见的输出里彻底隐形。
 """
 
 from __future__ import annotations
@@ -42,12 +44,6 @@ class Criterion:
     min_pass_rate: float | None = None
     min_samples: int = 1
     max_error_rate: float | None = None
-    # 缓存 pass_when 解析+校验后的 AST，避免 _evaluate_one 对同一个字符串
-    # 做 n_records 次重复 ast.parse（Ruling R20 (a)）。不是公开接口，不参与
-    # repr/相等比较。
-    _pass_when_ast: ast.expr | None = field(
-        default=None, init=False, repr=False, compare=False
-    )
 
     def __post_init__(self) -> None:
         if self.metric not in _ALLOWED_METRICS:
@@ -60,10 +56,19 @@ class Criterion:
             raise ValueError(f"direction 必须是 maximize/minimize，收到 {self.direction!r}")
         if self.max_error_rate is not None and not (0.0 <= self.max_error_rate <= 1.0):
             raise ValueError(f"max_error_rate 必须在 0..1 之间，收到 {self.max_error_rate!r}")
+        # Ruling R24：pass_when 解析+校验后的 AST 缓存成普通实例属性，不声明
+        # 成 dataclass field——声明成 field 会让 dataclasses.asdict(criterion)
+        # 把这里的 ast.Compare 一起带出来，json.dumps 直接 TypeError（Outcome
+        # 内嵌 criterion，期 2/3 的 monitor 把 outcomes 落成 CI artifact 时就
+        # 会炸）。普通实例属性对 dataclasses 的内省（asdict/fields/replace）
+        # 不可见；dataclasses.replace 会重跑 __post_init__，AST 因此总是被
+        # 重算，不会用一份可能对不上新 pass_when 的旧缓存。
+        #
+        # 在构造期就把 SyntaxError（表达式写残了）和 ValueError（用了白
+        # 名单外的节点/名字/运算符）挡下来——Ruling R20 (a)，详见
+        # _validate_pass_when 的 docstring。
+        self._pass_when_ast: ast.expr | None = None
         if self.pass_when is not None:
-            # 在构造期就把 SyntaxError（表达式写残了）和 ValueError（用了白
-            # 名单外的节点/名字/运算符）挡下来——Ruling R20 (a)，详见
-            # _validate_pass_when 的 docstring。
             self._pass_when_ast = _validate_pass_when(self.pass_when)
 
 
@@ -206,14 +211,18 @@ def _evaluate_one(c: Criterion) -> Outcome:
 
     required = c.threshold if c.metric == "average" else c.min_pass_rate
 
-    # Ruling R18 (b)：与样本规模无关的错误率闸门，放在 metric 逻辑之前。
-    # min_samples 只保证"够几条"，规模一大就形同虚设（48 条里 40 errored +
-    # 8 好，usable=8 一样能过 min_samples）；error_rate 才是不随规模漂移
-    # 的判据。
+    # Ruling R18 (b) + R22：与样本规模无关的错误率闸门，放在 metric 逻辑
+    # 之前。纯比例语义在小样本（比如 smoke 的 N=3）上会零容忍——1/3=0.333
+    # 早就超过 0.2，一次判官瞬时超时就把 PR 判红，很快会训练出"红了先重跑"
+    # 的习惯，门禁就废了。所以改成"绝对下限 + 比例"的双重语义：总是容忍 1
+    # 次（单次判官超时在任何规模上都是噪声，本闸门要抓的是系统性失效），
+    # 超出这 1 次之后再按比例判——N=3 时容忍 1 次、2 次红；N=48 时容忍 1
+    # 次、10 次红。min_samples 管的是另一件事（样本太少不足以判决），不受
+    # 这里影响，两者互不覆盖。
     total = len(errored) + len(usable)
     if c.max_error_rate is not None and total > 0:
         error_rate = len(errored) / total
-        if error_rate > c.max_error_rate:
+        if len(errored) > max(1, c.max_error_rate * total):
             return Outcome(
                 c, False, None, required, len(usable),
                 f"error rate {len(errored)}/{total} ({error_rate:.3f}) "
@@ -287,6 +296,13 @@ def format_scoreboard(outcomes: list[Outcome]) -> str:
             # 看得见的输出里彻底隐形（实测过：19/20 errored 时两条
             # faithfulness criteria 都 PASS，且旧版 format_scoreboard 只在
             # FAIL 行打 reason，"errored" 完全不出现在记分卡里）。
-            lines.append(f"{'':<22}⚠ {o.reason}")
+            #
+            # Ruling R23：标记用纯 ASCII（"WARN"），不用 ⚠（U+26A0）——这台
+            # 机器（self-hosted runner 的目标平台）默认输出编码是 gbk，
+            # U+26A0 编不进去：走 pytest terminalwriter 会把整块记分卡转义
+            # 成一行，裸 print 直接 UnicodeEncodeError 崩溃。可见性本身在
+            # 目标平台上碎掉等于没加。"└─" 与全角逗号"，"实测是 gbk-clean
+            # 的，不用换。
+            lines.append(f"{'':<22}WARN {o.reason}")
     lines.append("-" * 78)
     return "\n".join(lines)

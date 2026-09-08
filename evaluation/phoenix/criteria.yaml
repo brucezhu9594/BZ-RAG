@@ -2,14 +2,17 @@
 # metric: average   —— 均值必须过 threshold（direction: maximize 默认 / minimize）
 # metric: pass_rate —— 每条按 pass_when 判通过，通过比例必须达到 min_pass_rate
 #
-# offline 段的 min_samples / max_error_rate（Ruling R18）：
-#   min_samples: 2   —— smoke 跑 3 条（SMOKE_SIZE=3 × repetitions=1），设 2
-#                        可以容忍一次瞬时判官失败而不误红 PR，同时挡住 smoke
-#                        规模上的大面积失败。
-#   max_error_rate:  —— min_samples 在 master 全量规模上兜不住（比如 48 条
-#     0.2               预期里 40 errored + 8 好，usable=8 一样能过
-#                        min_samples）；错误率是与样本规模无关的判据，交给
-#                        它兜底。
+# offline 段的 min_samples / max_error_rate（Ruling R18，语义修正见 R22）：
+#   min_samples: 2   —— 管的是"样本太少不足以判决"：usable（非 errored）记录
+#                        数够不够 2 条，跟错误率无关，也不负责容忍判官失败。
+#   max_error_rate:  —— 与样本规模无关的错误率闸门，语义是"绝对下限 1 次 +
+#     0.2               超出后按比例"：总是容忍 1 次判官瞬时失败（任何规模
+#                        上都是噪声），超出这 1 次之后才按 0.2 的比例判。这
+#                        样 smoke（SMOKE_SIZE=3×repetitions=1，N=3）与 master
+#                        全量（N=48）两个规模都对：N=3 时容忍 1 次、2 次红；
+#                        N=48 时容忍 1 次、10 次红（纯比例语义在 N=3 上会
+#                        零容忍——1/3=0.333 早就超过 0.2，一次偶发超时就把
+#                        PR 判红，这不是本闸门想抓的系统性失效）。
 offline:
   - annotation: faithfulness
     metric: average

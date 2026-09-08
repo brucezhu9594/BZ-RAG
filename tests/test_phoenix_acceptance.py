@@ -323,3 +323,90 @@ def test_evaluate_all_survives_a_pass_when_type_error_and_still_scores_the_rest(
     assert not outs[0].passed
     assert "invalid pass_when" in outs[0].reason
     assert outs[1].passed
+
+
+# ——— Task review 第二轮复核：R22-R24 ———
+
+
+def test_max_error_rate_tolerates_one_transient_failure_at_smoke_scale():
+    # Ruling R22：smoke 规模 N=3，纯比例语义下 max_error_rate=0.2 会零容忍
+    # （1/3=0.333 早就超标），一次判官瞬时超时就把 PR 判红。改成"绝对下限
+    # 1 次 + 超出后按比例"之后，N=3 时 1 次 errored 必须被容忍。
+    acc.record("faithfulness", 1.0)
+    acc.record("faithfulness", 1.0)
+    acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all(
+        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
+    )
+    assert "exceeds max_error_rate" not in out.reason
+    assert out.passed
+
+
+def test_max_error_rate_still_fails_at_smoke_scale_with_two_errors():
+    # N=3，2 次 errored——超出"容忍 1 次"的绝对下限，必须判 FAIL（不能被
+    # min_samples 的宽松掩盖）。
+    acc.record("faithfulness", 1.0)
+    acc.record("faithfulness", None, error="judge timeout")
+    acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all(
+        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=1)]
+    )
+    assert not out.passed
+    assert "exceeds max_error_rate" in out.reason
+
+
+def test_max_error_rate_tolerates_one_transient_failure_at_master_scale():
+    # master 全量规模 N=48，比例下限是 max(1, 0.2*48)=9.6；1 次 errored 远
+    # 低于这个下限，必须容忍——这是 min_samples 在大规模下失效、错误率闸门
+    # 接管的场景（Ruling R18 (b) 的原始动机），这里确认新公式没有把它改坏。
+    for _ in range(47):
+        acc.record("faithfulness", 1.0)
+    acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all(
+        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
+    )
+    assert "exceeds max_error_rate" not in out.reason
+    assert out.passed
+
+
+def test_max_error_rate_fails_at_master_scale_with_ten_errors():
+    # N=48，10 次 errored：10 > max(1, 0.2*48=9.6)，必须判 FAIL。
+    for _ in range(38):
+        acc.record("faithfulness", 1.0)
+    for _ in range(10):
+        acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all(
+        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
+    )
+    assert not out.passed
+    assert "exceeds max_error_rate" in out.reason
+
+
+def test_scoreboard_marker_is_gbk_encodable():
+    # Ruling R23：本机默认输出编码是 gbk，U+26A0（⚠）编不进去。经 pytest 的
+    # terminalwriter 输出时会把整块记分卡转义成一行，裸 print 则直接
+    # UnicodeEncodeError 崩溃——记分卡是门禁面向人的唯一输出，可见性在目标
+    # 平台上碎掉等于没加。改成纯 ASCII 标记后，board 必须能在 gbk 下正常
+    # 编码，不能再抛异常。
+    acc.record("faithfulness", 1.0)
+    for _ in range(19):
+        acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, min_samples=1)])
+    board = acc.format_scoreboard([out])
+    assert "errored" in board
+    board.encode("gbk")  # 不抛 UnicodeEncodeError 即为通过
+
+
+def test_criterion_survives_asdict_and_json_dumps():
+    # Ruling R24：_pass_when_ast 曾经是 dataclass field，
+    # dataclasses.asdict(criterion) 会把里面的 ast.Compare 一起带出来，
+    # json.dumps 直接 TypeError。Outcome 内嵌 criterion，期 2/3 的 monitor
+    # 把 outcomes 落成 CI artifact 时就会炸。
+    import dataclasses
+    import json
+
+    c = acc.Criterion(annotation="faithfulness", metric="pass_rate",
+                       pass_when="score >= 0.5", min_pass_rate=0.9)
+    payload = json.dumps(dataclasses.asdict(c))
+    assert "faithfulness" in payload
+    assert "score >= 0.5" in payload
