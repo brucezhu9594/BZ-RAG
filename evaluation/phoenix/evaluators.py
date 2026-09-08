@@ -5,7 +5,19 @@ prompt 沿用 evaluation/mlflow_evaluate.py 里已经调过中文 rationale 的�
 分类优于数值评分（模型的数值推理不稳，且与人类判断相关性更差）。
 
 每个判官除了返回插件要的 dict，还向 acceptance 登记一条记录——判官抛异常时
-登记成 errored（第三态），不静默丢弃、也不当成 0 分。
+登记成 errored（第三态），不静默丢弃、也不当成 0 分。这一层保护必须包住"从
+output/input 里取值"这个提取动作本身（见 _run），否则 output 为 None（测试在
+log_output 之前就崩了）时会抛在保护范围外，该 case 就从统计里静默消失，而不是
+落进 errored 第三态。
+
+配置（JUDGE_OPENAI_API_KEY / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID）有意在
+import 期就检查、缺失就快速失败（Ruling R20）：Task 6 的 conftest.py 会在
+pytest 收集阶段 import 本模块，缺配置在收集阶段就崩比跑完全部 case × 判官的
+上百次调用后才发现全 errored 便宜得多；这里只保证报错可读（写清缺哪个变量、
+去哪设），不是延后检查的时机。注意这与"key 写错但存在"是两种不同的失败模式：
+LLM(...) 构造不打网络，错 key 不会在 import 期暴露，会在每次调用时变成
+errored 第三态、由 acceptance 的 max_error_rate 闸门抓住——两者都对，不需要
+统一成同一种失败时机。
 """
 
 import os
@@ -23,6 +35,15 @@ from phoenix.evals.llm import LLM
 from evaluation.phoenix import acceptance
 
 _CHOICES = {"incorrect": 0.0, "partial": 0.5, "correct": 1.0}
+
+_REQUIRED = ("JUDGE_OPENAI_API_KEY", "JUDGE_OPENAI_BASE_URL", "JUDGE_MODEL_ID")
+_missing = [k for k in _REQUIRED if not os.environ.get(k)]
+if _missing:
+    raise RuntimeError(
+        f"判官配置缺失：{', '.join(_missing)}。请在仓库根的 .env 里设置"
+        f"（见 .env.example 的 Phoenix 评估判官段）。"
+        f"注意本模块有意在 import 期就失败——缺配置时立刻红比跑完上百次判官调用再红便宜。"
+    )
 
 _llm = LLM(
     provider="openai",
@@ -106,9 +127,15 @@ _JUDGES = {
 }
 
 
-def _run(name: str, payload: dict) -> dict:
-    """跑一个判官并向 acceptance 登记。异常记成 errored（第三态），不吞、也不当 0 分。"""
+def _run(name: str, build_payload) -> dict:
+    """跑一个判官并向 acceptance 登记。
+
+    build_payload 是个零参闭包：**提取动作也必须在 try 内**，否则 output 为 None
+    （测试在 log_output 之前就崩了）时会抛在保护范围外，该 case 就从统计里静默消失，
+    而不是登记成 errored 第三态。异常记成 errored（第三态），不吞、也不当 0 分。
+    """
     try:
+        payload = build_payload()
         (score,) = _JUDGES[name].evaluate(payload)
     except Exception as e:  # noqa: BLE001 —— 判官失败必须成为可见的第三态
         acceptance.record(name, None, error=f"{type(e).__name__}: {e}")
@@ -138,31 +165,43 @@ def _unpack(output) -> tuple[str, str]:
 
 
 def faithfulness(output, **_) -> dict:
-    answer, reference = _unpack(output)
-    return _run("faithfulness", {"output": answer, "reference": reference})
+    def build_payload():
+        answer, reference = _unpack(output)
+        return {"output": answer, "reference": reference}
+
+    return _run("faithfulness", build_payload)
 
 
 def answer_relevancy(output, input=None, **_) -> dict:  # noqa: A002 —— 参数名由 Phoenix 约定
-    answer, _ref = _unpack(output)
-    return _run("answer_relevancy", {"output": answer, "input": input["question"]})
+    def build_payload():
+        answer, _ref = _unpack(output)
+        return {"output": answer, "input": input["question"]}
+
+    return _run("answer_relevancy", build_payload)
 
 
 def contextual_precision(output, input=None, expected=None, **_) -> dict:  # noqa: A002
-    _answer, reference = _unpack(output)
-    return _run(
-        "contextual_precision",
-        {"input": input["question"], "reference": reference, "expected": expected},
-    )
+    def build_payload():
+        _answer, reference = _unpack(output)
+        return {"input": input["question"], "reference": reference, "expected": expected}
+
+    return _run("contextual_precision", build_payload)
 
 
 def contextual_recall(output, expected=None, **_) -> dict:
-    _answer, reference = _unpack(output)
-    return _run("contextual_recall", {"reference": reference, "expected": expected})
+    def build_payload():
+        _answer, reference = _unpack(output)
+        return {"reference": reference, "expected": expected}
+
+    return _run("contextual_recall", build_payload)
 
 
 def refusal_check(output, input=None, **_) -> dict:  # noqa: A002
-    answer, _ref = _unpack(output)
-    return _run("refusal_check", {"output": answer, "input": input["question"]})
+    def build_payload():
+        answer, _ref = _unpack(output)
+        return {"output": answer, "input": input["question"]}
+
+    return _run("refusal_check", build_payload)
 
 
 EVALUATORS = [
