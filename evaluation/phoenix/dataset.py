@@ -15,9 +15,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from phoenix.client import Client
-
 from evaluation.phoenix.cases import CASES
+from phoenix.client import Client
 
 DATASET_NAME = os.environ.get("PHOENIX_TEST_DATASET", "bz-rag-golden")
 

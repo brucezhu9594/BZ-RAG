@@ -16,11 +16,11 @@ os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
 os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
 import pytest
-from phoenix.client.pytest import log_output
 
 from api.milvus_rag_phoenix import milvus_rag_phoenix_query_with_context
 from evaluation.phoenix.cases import CASES, SMOKE_IDS
 from evaluation.phoenix.evaluators import EVALUATORS
+from phoenix.client.pytest import log_output
 
 _PARAMS = [
     pytest.param(

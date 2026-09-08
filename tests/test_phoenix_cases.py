@@ -1,4 +1,4 @@
-from evaluation.phoenix.cases import CASES, CASE_IDS, SMOKE_IDS, example_id, smoke_ids
+from evaluation.phoenix.cases import CASE_IDS, CASES, SMOKE_IDS, example_id, smoke_ids
 
 
 def test_example_id_is_stable_and_16_hex():

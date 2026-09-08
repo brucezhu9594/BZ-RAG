@@ -29,10 +29,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from evaluation.phoenix import acceptance
 from phoenix.evals import ClassificationEvaluator
 from phoenix.evals.llm import LLM
-
-from evaluation.phoenix import acceptance
 
 _CHOICES = {"incorrect": 0.0, "partial": 0.5, "correct": 1.0}
 
