@@ -238,7 +238,7 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
 | `.github/workflows/canary-deploy.yml` | push 到 master 自动 | 切版本 + 部署 canary + KV=5 |
 | `.github/workflows/promote-stable.yml` | 手动 + 输入 version | KV=100 → 部署 stable → KV=0 |
 | `.github/workflows/rollback-canary.yml` | 手动 | KV=0 |
-| `.github/workflows/eval-gate.yml` | PR / push master（self-hosted runner） | 跑 Phoenix 离线评估门禁，聚合阈值不达标则挡下 |
+| `.github/workflows/eval-gate.yml` | PR / push master（self-hosted runner，注册步骤见 4.5） | 跑 Phoenix 离线评估门禁，聚合阈值不达标则挡下 |
 | `.github/workflows/<lint/test/build/security>.yml` | push / PR | 代码质量门禁 |
 
 **`eval-gate.yml` 几个不写清楚会踩坑的细节**（期 1 才接进来）：
@@ -315,6 +315,93 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
   `echo "PHOENIX_TEST_DATASET=bz-rag-golden-${BRANCH//\//-}" >> $GITHUB_ENV`
   （`BRANCH` 取 `github.head_ref || github.ref_name` 的值，`${VAR//\//-}` 是 bash 的
   批量字符替换，把所有 `/` 换成 `-`）。
+
+### 4.5 评估门禁的一次性安装：注册 self-hosted runner
+
+`eval-gate.yml`（见 4.4）依赖本机 Milvus 与本机 Phoenix，云端 runner 碰不到，所以它**不跑在
+GitHub 托管的 runner 上**，得先在这台开发机上手动注册一个 self-hosted runner。这是**一次性
+操作**——注册好装成服务之后，以后每次 PR / push master 都会自动被派到这台机器上跑，不需要
+重复本节步骤。
+
+#### 前提：账户必须是装了依赖的那个 Windows 账户
+
+实测发现 `phoenix` / `pytest` / `pandas` / `python-dotenv` 等一大票依赖只装在了 `ci24871`
+这个账户的 per-user site-packages 里，系统级的 `site-packages` 只有 2 个条目。runner
+装成 Windows 服务后**默认不以交互式用户身份运行**，账户不对的话，门禁第一次真跑会在
+`pytest evaluation/phoenix ...` 这步报 `ModuleNotFoundError`——**症状和"忘了 pip
+install"一模一样**，容易把排障方向带偏（原理见 4.4 对应条目）。
+
+而且这个账户名不能随手写成 `.\ci24871`：这台机器加入了 `careerintlinc.local` 域，`ci24871`
+是**域账户**，没有同名本地账户，`.\` 前缀只查本机、不会回落去查域，写 `.\ci24871` 会让下面
+第 2 步的 `config.cmd` 在注册阶段就直接账户解析失败。正确写法是 `CAREERINTLINC\ci24871`。
+
+#### 注册步骤
+
+1. 打开 `https://github.com/brucezhu9594/BZ-RAG/settings/actions/runners/new`，平台选
+   **Windows**，架构按机器实际情况选（多数是 x64）。页面会给一段专属临时 token，**必须
+   现取现用**——有效期短，过期了就回这个页面重新拿一个新的。
+2. 按页面给的命令下载、解压 runner 包之后，在 runner 目录下执行（把
+   `<页面给的 token>` 换成第 1 步页面上的真实 token）：
+
+   ```powershell
+   ./config.cmd --url https://github.com/brucezhu9594/BZ-RAG --token <页面给的 token> --labels bz-rag-local --runasservice --windowslogonaccount "CAREERINTLINC\ci24871"
+   ```
+
+   - `--labels bz-rag-local` 必须原样带上——`eval-gate.yml` 里 `runs-on: [self-hosted,
+     bz-rag-local]` 靠这个标签才能把任务派到这台机器，标签打错或漏打，job 会一直排队
+     找不到能跑的 runner。
+   - `--windowslogonaccount "CAREERINTLINC\ci24871"` 让 runner 服务以装了依赖的这个
+     账户运行（就是本机日常登录、跑 `pip install -r requirements.txt` 用的那个账户）。
+   - **不要在命令里额外拼一个 `--windowslogonpassword <密码>`**：`config.cmd` 检测到
+     指定了 `--windowslogonaccount` 但没给密码时，会**交互式**提示你输入，输入过程
+     不回显、也不进 PowerShell 历史记录，比明文写进命令行安全。如果你的场景必须
+     非交互执行、不得不用 `--windowslogonpassword`，要清楚这个值会明文出现在
+     PowerShell 历史（`Get-History`）里，用完记得清理。
+   - `--runasservice` 把 runner 装成 Windows 服务（开机自启、不需要留一个终端窗口）。
+     装服务这步如果提示需要管理员权限，换一个管理员 PowerShell 重新执行。
+3. 装完后确认服务在跑、且**运行账户对**：
+
+   ```powershell
+   Get-Service actions.runner.*
+   Get-CimInstance Win32_Service -Filter "Name LIKE 'actions.runner%'" | Select-Object Name, StartName, State
+   ```
+
+   第一条的 `Status` 应为 `Running`；第二条的 `StartName` 必须是 `CAREERINTLINC\ci24871`
+   （或等价显示为 `ci24871`）。如果显示成 `LocalSystem` / `NT AUTHORITY\...` 之类的
+   内建账户，说明 `--windowslogonaccount` 没生效，按下面"重做"小节卸载后重新走一遍
+   第 2 步。
+4. 打开 `https://github.com/brucezhu9594/BZ-RAG/settings/actions/runners`，确认能看到
+   一个标签为 `bz-rag-local` 的 runner，状态显示 **Idle**（不是 Offline）——这才算
+   注册成功。
+
+#### 需要重做时：先卸载服务，别直接 `config.cmd remove`
+
+一个已经装成 Windows 服务的 runner，直接 `config.cmd remove` 通常会报"仍配置为服务"。
+标准顺序（GitHub 官方 Windows self-hosted runner 移除文档）：
+
+```powershell
+.\svc.cmd stop
+.\svc.cmd uninstall
+./config.cmd remove --token <新 token>
+```
+
+`<新 token>` 要回第 1 步的页面重新取——旧 token 大概率已经过期。卸载干净之后，回到
+"注册步骤"的第 2 步重新走一遍。
+
+#### 注册完之后：验证门禁真的会拦不达标的改动（原计划 Step 3/4）
+
+1. 新建一个分支，把 `evaluation/phoenix/criteria.yaml` 里 `faithfulness` /
+   `metric: average` 那条的 `threshold: 0.8` 临时改成 `threshold: 0.99`，提交、推到
+   远程，对 `master` 开一个 PR。
+2. **预期变红**：PR 的 Checks 列表里 `Eval Gate / eval` 显示红叉。点进这次 run 的日志，
+   能看到一张 `Acceptance Criteria` 记分卡，`faithfulness` / `average` 那一行
+   `verdict` = `FAIL`，`observed`（实测均值）和 `required`（`0.990`）都在。
+3. 把 `threshold` 改回 `0.8`，提交、推到同一分支。
+4. **预期变绿**：同一个 PR 上 `Eval Gate / eval` 变绿。
+5. 验证完删掉这个测试分支即可，不需要合并。
+
+第一次跑（尤其是 push 到 master 触发的全量跑）建议全程盯着 Actions 日志——理由见 4.4
+"全量规模首跑"那条。
 
 辅助 shell 脚本（被 workflow 调用）：
 
@@ -417,7 +504,7 @@ scripts/
 ├── canary-deploy.yml         # 主 CD 流水线
 ├── promote-stable.yml        # 手动 promote
 ├── rollback-canary.yml       # 手动 rollback
-├── eval-gate.yml             # 评估门禁（期 1，self-hosted runner，见 4.4）
+├── eval-gate.yml             # 评估门禁（期 1，self-hosted runner，见 4.4 / runner 注册见 4.5）
 ├── lint.yml / test.yml / build.yml / security.yml  # 代码质量
 ```
 
