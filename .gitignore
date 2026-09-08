@@ -18,3 +18,11 @@ __pycache__/
 .coverage
 coverage.json
 htmlcov/
+
+# MLflow 本地 tracking server 产物
+mlflow.db
+mlruns/
+mlartifacts/
+/app/lancedb/db
+/docs
+/.phoenix

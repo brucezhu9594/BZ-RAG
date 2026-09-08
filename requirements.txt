@@ -26,8 +26,15 @@ zhipuai
 zai-sdk
 deepeval
 langfuse
+mlflow
 json_repair
 lxml
+
+# Phoenix 评估栈（与现有 mlflow / deepeval 平行，互不影响）
+arize-phoenix
+arize-phoenix-client[pytest,evals]
+openinference-instrumentation-langchain
+pyyaml
 
 # 安全约束：修复传递依赖中的已知漏洞
 pyjwt>=2.12.0  # CVE-2026-32597
