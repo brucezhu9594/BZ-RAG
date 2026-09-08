@@ -30,11 +30,15 @@ mlflow
 json_repair
 lxml
 
-# Phoenix 评估栈（与现有 mlflow / deepeval 平行，互不影响）
-arize-phoenix
-arize-phoenix-client[pytest,evals]
+# Phoenix tracing（生产运行时真正用到的那一小片）：api/milvus_rag_phoenix.py
+# 只 import phoenix.otel.register，跑 /api/milvus/query-phoenix 这一个端点用来
+# 产出 trace；LangChain 的 span 由 openinference-instrumentation-langchain 通过
+# register(auto_instrument=True) 自动挂载产出，不是手写 import，但同样是运行时
+# 依赖。评估 CI/CD 用的 Phoenix 服务端全家桶 + 判官/pytest 插件 + pyyaml 拆进了
+# requirements-eval.txt（见该文件顶部注释）——railway.toml 用 NIXPACKS 装的是
+# 这份 requirements.txt，不该背上一整套只有门禁才用得到的重依赖。
+arize-phoenix-otel
 openinference-instrumentation-langchain
-pyyaml
 
 # 安全约束：修复传递依赖中的已知漏洞
 pyjwt>=2.12.0  # CVE-2026-32597

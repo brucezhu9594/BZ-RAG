@@ -1,0 +1,18 @@
+# 评估门禁专用依赖（I2，最终整支 review）——只被 .github/workflows/eval-gate.yml
+# 和本机手动跑门禁/开发 Phoenix UI 用到，生产运行时不需要。
+#
+# 不放进 requirements.txt 的原因：railway.toml 用 NIXPACKS 装 requirements.txt
+# 构建生产镜像，arize-phoenix 是 Phoenix **服务端**全家桶（20.8.0，含 fastapi/
+# pandas/scikit-learn/sqlalchemy 等一整套，`pip show arize-phoenix` 列出的
+# Requires 有 40+ 项），docs/CD-pipeline.md Q1 记着 torch 这种体量的包就在
+# Railway 免费档构建容器上撞过 build OOM——生产运行时的
+# api/milvus_rag_phoenix.py 只 import phoenix.otel.register，那个符号在更轻的
+# arize-phoenix-otel 包里（已留在 requirements.txt），用不上这整套服务端。
+#
+# 依赖本身：
+#   arize-phoenix                       —— 本机 Phoenix 服务端（scripts/phoenix-up.ps1 起的那个）
+#   arize-phoenix-client[pytest,evals]  —— evaluation/phoenix/ 门禁套件用的 pytest 插件 + 判官
+#   pyyaml                              —— evaluation/phoenix/acceptance.py 解析 criteria.yaml
+arize-phoenix
+arize-phoenix-client[pytest,evals]
+pyyaml

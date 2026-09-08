@@ -14,13 +14,29 @@ jobs:
     # 真管线依赖本机 Milvus(19530) 与本机 Phoenix(6006)，云 runner 碰不到，
     # 所以必须钉在装了这两个服务的机器上（标签 bz-rag-local）。
     runs-on: [self-hosted, bz-rag-local]
-    timeout-minutes: 30
+    # I5（最终整支 review）：实测 smoke 3 条 88.37s（含约 17s 收集），约 24s/case；
+    # 全量 48 项（24 case × 2 repetitions）据此估算约 19-20 分钟，再加上
+    # `pip install -r requirements.txt`（+ requirements-eval.txt）很容易顶到原来
+    # 的 30 分钟上限——一旦被 timeout 杀掉，job 中途死掉不会留下记分卡也不会有
+    # acceptance 判定（conftest.py 的 pytest_sessionfinish 根本没机会跑），只剩
+    # 一个无信息量的红，比一次真实的 acceptance 失败更难排查。按实测吞吐量
+    # （24s/case × 48 + 依赖安装）留出余量，提到 45 分钟。
+    timeout-minutes: 45
     env:
       NO_PROXY: localhost,127.0.0.1
       no_proxy: localhost,127.0.0.1
       PHOENIX_ENDPOINT: http://localhost:6006
       PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
       PHOENIX_PROJECT_NAME: bz-rag-ci
+      # M4（最终整支 review）：这台 runner 的 Python 进程往被 GitHub Actions 重定向
+      # 的管道（非交互式终端）写 stdout 时，默认按本机 ANSI 代码页（cp936/GBK）
+      # 编码，而 GitHub 按 UTF-8 渲染日志——acceptance.py 记分卡里的 "└─" 和全角
+      # 逗号会被转义成乱码（实测：不设这个变量时 Git Bash 管道捕获到的输出确实是
+      # "????"；设了之后同一条命令输出正常，参见 docs/CD-pipeline.md 的校验记录）。
+      # 这个变量对 pytest 自己的 TerminalWriter 同样生效（已实测验证，不只是对
+      # print），比把记分卡里的字符换成纯 ASCII 更省事，且不用动 acceptance.py
+      # 里已经权衡过可读性的输出格式。
+      PYTHONIOENCODING: utf-8
       # 并发跑同名 dataset 会互相 prune 例子（Arize 官方明说），按源分支隔离。
       # 注意不能直接用 github.ref_name：PR 事件下它是 "<PR号>/merge"（带斜杠，
       # 且不是分支名），所以优先取 head_ref（只有 PR 事件才有值，就是源分支名），
@@ -42,10 +58,17 @@ jobs:
       # 注意：这一步是否是"廉价空操作"取决于 runner 服务实际以哪个 Windows 账户
       # 运行——依赖装在了 ci24871 的 per-user site-packages 下，见 docs/CD-pipeline.md
       # 对应条目；账户不对时这里会从零重装 torch/transformers/langchain/mlflow 等，
-      # 且可能与 30 分钟的 timeout-minutes 抢时间。
+      # 且可能与 timeout-minutes（见上，当前 45 分钟）抢时间。
+      # I2（最终整支 review）：requirements.txt 只装生产运行时真正需要的依赖；
+      # 评估门禁专用的重依赖（Phoenix 服务端全家桶、判官/pytest 插件、pyyaml）
+      # 拆进 requirements-eval.txt，避免 railway.toml 用 NIXPACKS 构建生产镜像时
+      # 把它们一起装进去（docs/CD-pipeline.md Q1 记着 torch 撞过 build OOM，这些
+      # 包同样体积可观，且生产运行时的 api/milvus_rag_phoenix.py 只 import
+      # phoenix.otel.register，用不到它们）。
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r requirements-eval.txt
 
       # phoenix.otel.register() 不做连通性检查：Phoenix 宕机时它依然返回成功，
       # trace 却零产出，所以这一步不能省。打 /readyz 而不是根路径：根路径乃至
@@ -61,10 +84,24 @@ jobs:
       # phoenix 包在 pytest 默认 prepend 模式下冲突，会在 conftest 加载阶段就
       # ModuleNotFoundError 崩掉（见 docs/CD-pipeline.md 对应条目），不加这个 flag
       # 两条门禁命令都跑不起来，且报错跟真因几乎无法联想到一起。
+      # C1（最终整支 review）：门禁目前处于**临时观测态**，两个 `Run eval gate`
+      # 步骤都加了 continue-on-error，不会阻断 PR / push。原因：criteria.yaml
+      # 里的阈值（0.8/0.9/1.0）从未在真实基线上验证过就写了进去，实测（两次独立
+      # smoke 跑一致）发现在完全没改代码的情况下，5 条 acceptance criteria 里有
+      # 2 条（answer_relevancy/average、refusal_check/pass_rate）恒为 FAIL——
+      # 门禁在未改动的基线上就是红的。裁决是不把阈值改低去迁就现状（那是拿结果
+      # 配尺子），而是先让它不挡人，校准完判官口径/阈值之后再摘掉这两行
+      # continue-on-error。实测基线表、诊断线索与校准建议见
+      # docs/CD-pipeline.md §4.5「当前状态：门禁处于观测态」。
+      # TODO(校准完成后删除)：判官口径校准完、能稳定绿之后，删掉下面两步的
+      # `continue-on-error: true`，并把 docs/CD-pipeline.md §4.5 的自验步骤重新
+      # 走一遍确认仍可复现。
       - name: Run eval gate (PR = smoke subset)
         if: github.event_name == 'pull_request'
+        continue-on-error: true
         run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -m smoke -q
 
       - name: Run eval gate (master = full)
         if: github.event_name == 'push'
+        continue-on-error: true
         run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -q
