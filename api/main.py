@@ -14,6 +14,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# DeepEval tracing 用 aiohttp 异步上报 Confident AI，而 aiohttp 默认不读 HTTP(S)_PROXY；
+# 在需要代理访问外网的环境下会连不上 api.confident-ai.com（直连超时）。
+# 开 trust_env 让 aiohttp 走系统代理；无代理的环境（如 Railway）则直连，两种都正确。
+import aiohttp as _aiohttp
+
+_orig_session_init = _aiohttp.ClientSession.__init__
+
+
+def _session_init_trust_env(self, *args, **kwargs):
+    kwargs.setdefault("trust_env", True)
+    _orig_session_init(self, *args, **kwargs)
+
+
+_aiohttp.ClientSession.__init__ = _session_init_trust_env
+
+# 进程退出时 flush 未推送的 trace（默认 daemon worker 会被强杀，丢尾部 trace）。
+os.environ.setdefault("CONFIDENT_TRACE_FLUSH", "1")
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
@@ -82,6 +100,61 @@ def milvus_query(req: QueryRequest) -> QueryResponse:
 
     try:
         answer = milvus_rag_query(req.query, thread_id=req.thread_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG 调用失败：{type(e).__name__}: {e}",
+        ) from e
+
+    return QueryResponse(answer=answer, version=APP_VERSION)
+
+
+@app.post("/api/milvus/query-mlflow")
+def milvus_query_mlflow(req: QueryRequest) -> QueryResponse:
+    """Milvus 混合检索 + MLflow tracing（span/trace/session → MLflow server），供单轮 + 多轮评估。"""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="query 不能为空")
+
+    try:
+        from api.milvus_rag_mlflow import milvus_rag_mlflow_query
+    except KeyError as e:
+        raise HTTPException(status_code=503, detail=f"环境变量缺失：{e}") from e
+    except Exception as e:
+        # 模块 import 时连 MLflow tracking server 建实验，连不上在这里暴露。
+        raise HTTPException(
+            status_code=503,
+            detail=f"MLflow 初始化失败：{type(e).__name__}: {e}",
+        ) from e
+
+    try:
+        answer = milvus_rag_mlflow_query(req.query, session_id=req.thread_id)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG 调用失败：{type(e).__name__}: {e}",
+        ) from e
+
+    return QueryResponse(answer=answer, version=APP_VERSION)
+
+
+@app.post("/api/milvus/query-phoenix")
+def milvus_query_phoenix(req: QueryRequest) -> QueryResponse:
+    """Milvus 混合检索 + Phoenix tracing（span/trace → 本地 Phoenix），供评估门禁与线上评估。"""
+    if not req.query.strip():
+        raise HTTPException(status_code=400, detail="query 不能为空")
+
+    try:
+        from api.milvus_rag_phoenix import milvus_rag_phoenix_query
+    except KeyError as e:
+        raise HTTPException(status_code=503, detail=f"环境变量缺失：{e}") from e
+    except Exception as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Phoenix 初始化失败：{type(e).__name__}: {e}",
+        ) from e
+
+    try:
+        answer = milvus_rag_phoenix_query(req.query, session_id=req.thread_id)
     except Exception as e:
         raise HTTPException(
             status_code=500,
