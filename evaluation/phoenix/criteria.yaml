@@ -1,0 +1,35 @@
+# 离线门禁与线上 monitor 共用的阈值声明。
+# metric: average   —— 均值必须过 threshold（direction: maximize 默认 / minimize）
+# metric: pass_rate —— 每条按 pass_when 判通过，通过比例必须达到 min_pass_rate
+offline:
+  - annotation: faithfulness
+    metric: average
+    threshold: 0.8
+  - annotation: faithfulness
+    metric: pass_rate
+    pass_when: "score >= 0.5"
+    min_pass_rate: 0.9
+  - annotation: answer_relevancy
+    metric: average
+    threshold: 0.8
+  - annotation: contextual_recall
+    metric: pass_rate
+    pass_when: "label != 'incorrect'"
+    min_pass_rate: 1.0
+  - annotation: refusal_check
+    metric: pass_rate
+    pass_when: "label == 'ok'"
+    min_pass_rate: 1.0
+
+# 期 3 用；线上比离线松一档，且样本量不足要判 hold 而不是通过。
+online:
+  - annotation: faithfulness
+    metric: pass_rate
+    pass_when: "score >= 0.5"
+    min_pass_rate: 0.85
+    min_samples: 20
+  - annotation: refusal_check
+    metric: pass_rate
+    pass_when: "label == 'ok'"
+    min_pass_rate: 0.98
+    min_samples: 20
