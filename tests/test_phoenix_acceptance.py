@@ -97,6 +97,22 @@ def test_all_criteria_are_evaluated_even_when_the_first_fails():
     assert outs[1].passed
 
 
+def test_average_includes_legitimate_zero_scores_not_just_truthy_ones():
+    # I1（最终整支 review）：acceptance.py 里 `if r.score is not None` 是唯一
+    # 支撑"哪些记录算进均值"的判据。0.0 是合法分数（faithfulness 的 incorrect、
+    # refusal_check 的 refused/empty 都映射到 0.0），不是"没有值"，必须被计入。
+    # 用 (1.0, 1.0, 0.0, 0.0)：`is not None` 版本四条全计入，均值 0.5，FAIL
+    # （threshold 0.8）。如果有人把判据"优化"成 `if r.score`（把 falsy 的 0.0
+    # 当成"没有值"排除），就只剩两条 1.0，均值变成 1.0，错误地 PASS——这条测试
+    # 就是用来锁死不能退化成那个版本。
+    for s in (1.0, 1.0, 0.0, 0.0):
+        acc.record("faithfulness", s)
+    (out,) = acc.evaluate_all([_crit(threshold=0.8)])
+    assert out.samples == 4
+    assert out.observed == pytest.approx(0.5)
+    assert not out.passed
+
+
 def test_min_samples_yields_insufficient_not_pass():
     acc.record("faithfulness", 1.0)
     (out,) = acc.evaluate_all([_crit(min_samples=5)])

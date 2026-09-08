@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import ast
 import operator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import yaml
 
@@ -93,6 +93,15 @@ def record(
     name: str, score: float | None, label: str | None = None, error: str | None = None
 ) -> None:
     _RECORDS.setdefault(name, []).append(Record(score=score, label=label, error=error))
+
+
+def record_count(name: str) -> int:
+    """已经给 name 登记了多少条记录（errored + usable 都算，只问"记录本身存在
+    没有"）。C2（最终整支 review）：conftest.py 用它跟"这次会话本该产出多少条"
+    的基准比对，抓 Phoenix 插件早退导致 record() 一次都没被调用的落库失败——
+    跟 max_error_rate 管的"record 被调用、但判官报错"是两个不同的漏洞面。
+    """
+    return len(_RECORDS.get(name, []))
 
 
 # —— pass_when：只允许比较运算与 score/label 两个名字，不用 eval ——
@@ -243,9 +252,15 @@ def _evaluate_one(c: Criterion) -> Outcome:
                            f"insufficient samples: {len(numeric)} < {c.min_samples}{err_note}")
         observed = sum(numeric) / len(numeric)
         passed = observed >= c.threshold if c.direction == "maximize" else observed <= c.threshold
-        cmp = ">=" if c.direction == "maximize" else "<="
+        # L345：reason 必须陈述实际发生的关系，不能把"检查式"原样印出来——
+        # 检查式是 ">= threshold"，FAIL 时观测值恰恰没满足它，原样打印出
+        # "mean 0.667 >= 0.99" 在一行 FAIL 判定旁边读起来像是在断言这件事成立，
+        # 是一句假话。PASS 时打印检查式本身没问题（它确实成立），FAIL 时改打印
+        # 真正成立的方向（maximize 方向下是 <，minimize 方向下是 >）。
+        check_cmp = ">=" if c.direction == "maximize" else "<="
+        shown_cmp = check_cmp if passed else ("<" if c.direction == "maximize" else ">")
         return Outcome(c, passed, observed, required, len(numeric),
-                       f"mean {observed:.3f} {cmp} {c.threshold}{err_note}")
+                       f"mean {observed:.3f} {shown_cmp} {c.threshold}{err_note}")
 
     if len(usable) < c.min_samples:
         return Outcome(c, False, None, required, len(usable),
@@ -262,8 +277,10 @@ def _evaluate_one(c: Criterion) -> Outcome:
                        f"invalid pass_when: {e}{err_note}")
     observed = passing / len(usable)
     passed = observed >= c.min_pass_rate
+    # L345：同上——FAIL 时不能原样打印检查式 ">="，改打印实际成立的 "<"。
+    shown_cmp = ">=" if passed else "<"
     return Outcome(c, passed, observed, required, len(usable),
-                   f"pass rate {observed:.3f} >= {c.min_pass_rate}{err_note}")
+                   f"pass rate {observed:.3f} {shown_cmp} {c.min_pass_rate}{err_note}")
 
 
 def evaluate_all(criteria: list[Criterion]) -> list[Outcome]:
