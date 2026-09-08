@@ -316,12 +316,102 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
   （`BRANCH` 取 `github.head_ref || github.ref_name` 的值，`${VAR//\//-}` 是 bash 的
   批量字符替换，把所有 `/` 换成 `-`）。
 
+#### `criteria.yaml` 模型：声明式验收条件怎么读、怎么改
+
+评估门禁判"过不过"，全靠 `evaluation/phoenix/criteria.yaml` 里 `offline` 段（`online` 段是给
+期 3 线上 monitor 用的，本节只讲 `offline`）声明的一组 criterion。求值引擎是
+`evaluation/phoenix/acceptance.py`，在 `conftest.py` 的 `pytest_sessionfinish`（所有 case 都跑完
+之后）里统一算，一次看到全部回归。每条 criterion 是这几个字段的组合：
+
+| 字段 | 含义 |
+|---|---|
+| `annotation` | 判官的名字，对应 `evaluators.py` 里 `_JUDGES` 的 key（`faithfulness` / `answer_relevancy` / `contextual_recall` / `refusal_check`；`contextual_precision` 判官一直在跑，但当前没有任何 criterion 引用它——只是跑了、记了，没被拿去判定） |
+| `metric` | `average`（均值必须过 `threshold`）或 `pass_rate`（按 `pass_when` 表达式判定每条通过与否，通过比例必须达到 `min_pass_rate`）二选一 |
+| `threshold` | `metric: average` 专用，均值要达到的门槛 |
+| `direction` | `maximize`（默认，均值要 `>= threshold`）或 `minimize`（均值要 `<= threshold`，给 latency 这类"越小越好"的指标用） |
+| `pass_when` | `metric: pass_rate` 专用，一个只能引用 `score` / `label` 两个名字、只能用 `== != < <= > >=` 与 `and`/`or` 的表达式字符串（解析成 AST 求值，不用 `eval`，见 `acceptance.py` 的 `_validate_pass_when`），例如 `"score >= 0.5"` 或 `"label != 'incorrect'"` |
+| `min_pass_rate` | `metric: pass_rate` 专用，通过比例的门槛（0~1） |
+| `min_samples` | 参与判定的样本数（`average` 数值样本数 / `pass_rate` 的 usable 记录数）至少要有几条，不够就判 FAIL（"insufficient samples"），不会 vacuously pass |
+| `max_error_rate` | 与样本规模无关的错误率闸门（0~1，可不填）：语义是"绝对下限 1 次 + 超出后按比例"——总是容忍 1 次判官瞬时失败，超出这 1 次之后再按这个比例判 FAIL。`min_samples` 管的是"样本太少不足以判决"，`max_error_rate` 管的是"错误占比太高"，两者互不覆盖，`smoke`（N=3）与全量（N=48）都不用分别调参 |
+
+**怎么加一条新的 criterion**：在 `offline:` 列表下加一项，`annotation` 填判官名字（要在
+`evaluators.py` 的 `_JUDGES` 里真实存在），照上表选 `metric` 及对应的必填字段。构造期
+（`Criterion.__post_init__`）会校验字段组合是否合法、`pass_when` 语法是否正确——写残了会在
+`pytest_configure` 阶段（跑任何 case 之前）就报错，不用等一整轮判官调用跑完才发现（这是 I4 修的，
+见下面的实施记录）。
+
+**怎么调阈值**：直接改对应字段的数值，提交、观察下一次门禁跑出来的记分卡。**不要凭空定数字**——
+本轮的 C1 教训就是阈值从没在真实基线上测过就写进了 `criteria.yaml`，结果门禁在未改动的代码上就是
+红的（见上面「当前状态：门禁处于观测态」）。调阈值前先跑一次 smoke（或看最近一次 CI 记分卡）拿到
+实测基线，再决定新阈值，而不是先定一个"看起来严格"的数字再去凑。
+
+#### 怎么启动 / 确认本机 Milvus(19530) 与 Phoenix(6006)
+
+评估门禁（`eval-gate.yml`）和本机开发调评估都需要这两个服务先跑起来，这也是为什么这条门禁必须
+钉 self-hosted runner（见上面「几个不写清楚会踩坑的细节」第一条）：
+
+- **Milvus**：`docker compose -f app/milvus/docker-compose.yml up -d`。确认是否在跑：
+  `docker compose -f app/milvus/docker-compose.yml ps` 看到 `running`，或者直接连一下：
+  ```
+  python -c "from pymilvus import MilvusClient; c = MilvusClient(uri='http://localhost:19530'); print(c.list_collections())"
+  ```
+  能列出集合名（比如 `hewa_help_collection`）就是通的；`connection refused` 就是没启动，回去
+  跑上面那条 `docker compose up -d`。
+- **Phoenix**：`scripts/phoenix-up.ps1`（PowerShell，`./scripts/phoenix-up.ps1`）。这个脚本会把
+  `NO_PROXY`/`no_proxy` 设成 `localhost,127.0.0.1`（本机 Privoxy 会拦 127.0.0.1，不设会莫名其妙
+  连不上）、把工作目录钉在仓库下的 `.phoenix/`，然后优先用 `python -m phoenix.server.main serve`
+  启动（比直接指望 `phoenix` 这个 console_script 在 PATH 里更稳，原因见脚本内注释）。起来之后
+  UI 在 `http://localhost:6006`，健康检查同 CI 里那一步：
+  ```
+  curl -s -o /dev/null -w "phoenix=%{http_code}\n" --max-time 10 --fail http://localhost:6006/readyz
+  ```
+  返回 `phoenix=200` 才算真的连上库、能记 trace（根路径 `/` 会被 SPA 的 catch-all 兜成 200，
+  测不出"进程活着但连不上库"这种情况，务必打 `/readyz`）。
+- 两个服务确认都通了之后，才能跑 `pytest evaluation/phoenix -o addopts="" --import-mode=importlib -q`
+  （本机手动跑）或者让 `eval-gate.yml` 在 self-hosted runner 上跑起来。
+
 ### 4.5 评估门禁的一次性安装：注册 self-hosted runner
 
 `eval-gate.yml`（见 4.4）依赖本机 Milvus 与本机 Phoenix，云端 runner 碰不到，所以它**不跑在
 GitHub 托管的 runner 上**，得先在这台开发机上手动注册一个 self-hosted runner。这是**一次性
 操作**——注册好装成服务之后，以后每次 PR / push master 都会自动被派到这台机器上跑，不需要
 重复本节步骤。
+
+#### 当前状态：门禁处于观测态，不阻断 PR（校准中，2026-09-08 起）
+
+`eval-gate.yml` 里两个 `Run eval gate` 步骤都加了 `continue-on-error: true`——**这是临时状态**。
+根因：`criteria.yaml` 里的阈值（`threshold: 0.8` / `min_pass_rate: 0.9` / `1.0`）在写计划的时候是
+凭空定的，从没在真实基线上验证过。实测（两次独立 smoke 跑，`criteria.yaml` 与当前提交一致，
+结果一致、非抖动）发现：**在完全没改任何代码的情况下**，5 条 acceptance criteria 里有 2 条恒为
+FAIL，意味着门禁一旦摘掉 `continue-on-error`，master 上每个 PR 都会被无差别拦下。
+
+实测基线（2026-09-08，smoke 3 条 case）：
+
+```
+annotation            metric        observed  required     n  verdict
+faithfulness          average          0.833     0.800     3  PASS
+faithfulness          pass_rate        1.000     0.900     3  PASS
+answer_relevancy      average          0.500     0.800     3  FAIL   ← 恒红
+contextual_recall     pass_rate        1.000     1.000     3  PASS
+refusal_check         pass_rate        0.333     1.000     3  FAIL   ← 恒红
+```
+
+**诊断线索（校准前请先看这个，别急着调阈值）**：`refusal_check` 把 3 条 smoke case 里的 2 条判成
+`refused`，而同一批里 `faithfulness`（0.833）与 `contextual_recall`（1.0）都正常——这更像是护栏
+判官（`evaluation/phoenix/evaluators.py` 里的 `_REFUSAL_T` prompt）口径偏严，把"没有直接给出具体
+数字/来源"的回答误判成拒答，而不是管线本身坏了。`answer_relevancy` 0.5 也可能指向真实的相关性
+缺陷（`_RELEVANCY_T` 判的是"回答是否直接完整地回应了问题"），需要具体看这 3 条 case 的判官
+`explanation` 字段再下结论。**校准的第一步是去读这两个判官在这 3 条 case 上的 rationale，判断是
+prompt 措辞需要改、还是管线真的有相关性问题，而不是直接调低 `criteria.yaml` 里的阈值**——阈值是
+用来衡量质量的尺子，拿实测结果去配尺子本末倒置，且会把 `answer_relevancy` 可能存在的真实缺陷
+一起盖过去。
+
+校准完成、能稳定绿之后要做的两件事：
+
+1. 删掉 `.github/workflows/eval-gate.yml` 里两个 `Run eval gate` 步骤的 `continue-on-error: true`；
+2. 把下面「注册完之后：验证门禁真的会拦不达标的改动」这节的自验步骤重新走一遍，确认它仍然可复现
+   （那节的说明目前是按"观测态"写的，摘掉 `continue-on-error` 之后 PR 的 Checks 图标会重新变成
+   有效信号，届时可以把"看日志"换回"看 Checks 图标"）。
 
 #### 前提：账户必须是装了依赖的那个 Windows 账户
 
@@ -390,15 +480,29 @@ install"一模一样**，容易把排障方向带偏（原理见 4.4 对应条�
 
 #### 注册完之后：验证门禁真的会拦不达标的改动（原计划 Step 3/4）
 
+> **门禁目前处于观测态**（见上面「当前状态」小节，`continue-on-error: true`）：不管记分卡判定
+> 如何，PR 的 Checks 列表里 `Eval Gate / eval` 都会显示绿色——`continue-on-error` 会把"步骤失败"
+> 吞成"job 仍算成功"，所以下面的自验**不能靠看 Checks 图标**，必须点进这次 run 的日志看
+> `Acceptance Criteria` 记分卡本身。校准完成、删掉 `continue-on-error` 之后，Checks 图标才会
+> 重新变成有效信号，到时候可以把下面两步的"看日志"换回"看 Checks 图标"。
+>
+> 另外：当前基线里 `answer_relevancy` 与 `refusal_check` 两条恒为 FAIL（见上面基线表），所以自验
+> 刻意只盯 `faithfulness` / `metric: average` 这一条——它是基线下唯一稳定 PASS 的 criterion
+> （0.833 >= 0.8），改它的阈值能观察到真实的 FAIL → PASS 往返，不会被另外两条恒红的 criteria
+> 干扰掉这次验证的意义。
+
 1. 新建一个分支，把 `evaluation/phoenix/criteria.yaml` 里 `faithfulness` /
    `metric: average` 那条的 `threshold: 0.8` 临时改成 `threshold: 0.99`，提交、推到
    远程，对 `master` 开一个 PR。
-2. **预期变红**：PR 的 Checks 列表里 `Eval Gate / eval` 显示红叉。点进这次 run 的日志，
-   能看到一张 `Acceptance Criteria` 记分卡，`faithfulness` / `average` 那一行
-   `verdict` = `FAIL`，`observed`（实测均值）和 `required`（`0.990`）都在。
+2. **预期**：点进 `Eval Gate / eval` 这次 run 的日志（图标本身仍是绿的，见上面的提示），能看到
+   一张 `Acceptance Criteria` 记分卡，`faithfulness` / `average` 那一行 `verdict` 从基线的 `PASS`
+   变成 `FAIL`，`observed`（0.833，没变）和 `required`（变成了 `0.990`）都在。
 3. 把 `threshold` 改回 `0.8`，提交、推到同一分支。
-4. **预期变绿**：同一个 PR 上 `Eval Gate / eval` 变绿。
-5. 验证完删掉这个测试分支即可，不需要合并。
+4. **预期**：同一个 PR 上再点进新一次 run 的日志，`faithfulness` / `average` 那一行的 `verdict`
+   变回 `PASS`——这就是可复现的"红 → 绿"，即使 `answer_relevancy` / `refusal_check` 两条在整张
+   记分卡上仍然是 FAIL（那是当前基线的已知状态，见上面小节，不代表这次自验失败）。
+5. 验证完删掉这个测试分支即可，不需要合并（Phoenix 里会遗留一个
+   `bz-rag-golden-<测试分支名>` 数据集，纯观感问题，不影响功能）。
 
 第一次跑（尤其是 push 到 master 触发的全量跑）建议全程盯着 Actions 日志——理由见 4.4
 "全量规模首跑"那条。
@@ -485,10 +589,21 @@ git push
 .releaserc.json               # semantic-release 规则（master 分支、tag 格式 v${version}）
 railway.toml                  # Railway 部署配置（NIXPACKS、健康检查路径、启动命令）
 .python-version               # Python 3.10
-requirements.txt              # Python 依赖（注意：torch 用 CPU 版避免 OOM）
+requirements.txt              # 生产运行时依赖（注意：torch 用 CPU 版避免 OOM；只留
+                               #   railway.toml 用 NIXPACKS 构建生产镜像真正需要的包）
+requirements-eval.txt         # 评估门禁专用依赖（Phoenix 服务端 + 判官/pytest 插件 +
+                               #   pyyaml，只被 eval-gate.yml 和本机手动跑门禁用到，见 4.4）
 
 api/                          # FastAPI 应用
-├── main.py                   # /, /api/health, /api/query 三个端点
+├── main.py                   # 6 个端点：/、/api/health、/api/query、/api/milvus/query、
+                               #   /api/milvus/query-mlflow、/api/milvus/query-phoenix
+├── milvus_rag_phoenix.py     # /api/milvus/query-phoenix 的管线，Phoenix/OpenInference tracing
+
+evaluation/phoenix/           # Phoenix 离线评估门禁套件（期 1，见 4.4 的 criteria.yaml 模型详解）
+├── conftest.py               # 声明式验收条件挂进 pytest 生命周期（sessionfinish 判定 + 退出码）
+├── acceptance.py             # 验收条件的求值引擎，零 Phoenix 依赖
+├── criteria.yaml             # 阈值声明（offline/online 两段），见 4.4 的模型详解
+├── cases.py / evaluators.py / dataset.py / test_rag_eval.py
 
 cf-worker/                    # Cloudflare Worker（流量分流器）
 ├── src/index.js              # 50 行核心路由代码
@@ -498,7 +613,8 @@ cf-worker/                    # Cloudflare Worker（流量分流器）
 
 scripts/
 ├── cf-kv-update.sh           # 改 KV canary_weight
-└── wait-for-health.sh        # 轮询 health 直到期望版本
+├── wait-for-health.sh        # 轮询 health 直到期望版本
+└── phoenix-up.ps1            # 起本机 Phoenix（评估门禁依赖它，见 4.4 的启动小节）
 
 .github/workflows/
 ├── canary-deploy.yml         # 主 CD 流水线
