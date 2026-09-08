@@ -285,7 +285,12 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
   `python`/`pip`——这样门禁就不再依赖"runner 服务恰好以哪个账户运行"这个隐藏前提。
   这个前提如果不对，`Install dependencies` 那一步也不再是"廉价空操作"：它会从零重装
   torch/transformers/langchain/mlflow 等一整套依赖，可能与 30 分钟的 `timeout-minutes`
-  抢时间。
+  抢时间。**账户名要写成 `CAREERINTLINC\ci24871`，不能写 `.\ci24871`**：这台机器加入了
+  `careerintlinc.local` 域（`whoami` 输出 `careerintlinc\ci24871`，`Get-LocalUser -Name
+  ci24871` 查不到本地同名账户），`ci24871` 是**域账户**而不是本地账户，而 `.\` 前缀在
+  Windows 账户解析里明确限定"只查本机"、不会回落去查域——用 `.\ci24871` 会在
+  `config.cmd` 注册这一步就直接账户解析失败。日后如果这台机器移出域、或改用本地账户
+  跑 runner，写法要相应改回 `.\<账户名>`。
 - **健康检查打的是 `/readyz` 而不是根路径 `/`**：Phoenix 前端是个 SPA，根路径乃至任意
   不存在的路径都会被前端的 catch-all 路由兜成 200，所以打根路径只能证明"6006 端口上有
   个 HTTP server 在听"，对"进程活着但连不上数据库、记不了 trace"这个真实失败模式
@@ -297,6 +302,19 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
   这条路径的首次真实验证**。预计要跑 240 次判官调用 + 48 次完整 RAG 管线，10-20 分钟，
   首次跑建议盯着 Actions 日志看到底，别把中途卡住当成"还在跑"。（这条提示是一次性的——
   首次全量跑验证通过、确认过程稳定之后，可以把这条从文档里删掉。）
+- **已知局限：源分支名带斜杠时，`PHOENIX_TEST_DATASET` 也会带斜杠**。`PHOENIX_TEST_DATASET:
+  bz-rag-golden-${{ github.head_ref || github.ref_name }}` 解决的是"PR 事件下
+  `ref_name` 不是分支名"这一半问题；本仓库分支命名习惯本身带斜杠（如
+  `feat/sourcing-component-eval`），所以 PR 触发时 dataset 名会形如
+  `bz-rag-golden-feat/sourcing-component-eval`，字面带斜杠。这是**有意不修的观感问题，
+  不是功能缺陷**：dataset 名走 HTTP 的 query 参数/JSON body 而非 URL path 段，Phoenix
+  服务端没有对它做字符集校验，斜杠不会导致路由错乱或建错资源，纯粹是在 Phoenix UI 里看
+  着别扭。没修的原因是 GitHub Actions 的表达式语法没有 `replace()` 函数，真要 sanitize
+  得在 workflow 里专门加一步写 `$GITHUB_ENV` 的 shell 脚本，为一个纯观感问题给 workflow
+  添复杂度不划算。日后如果真觉得碍眼，配方是加一步：
+  `echo "PHOENIX_TEST_DATASET=bz-rag-golden-${BRANCH//\//-}" >> $GITHUB_ENV`
+  （`BRANCH` 取 `github.head_ref || github.ref_name` 的值，`${VAR//\//-}` 是 bash 的
+  批量字符替换，把所有 `/` 换成 `-`）。
 
 辅助 shell 脚本（被 workflow 调用）：
 
