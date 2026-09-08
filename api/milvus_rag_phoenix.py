@@ -95,7 +95,7 @@ def _retrieve(query: str) -> list[Document]:
         return docs
 
 
-@_tracer.chain
+@_tracer.reranker
 def _rerank(query: str, docs: list[Document]) -> list[Document]:
     from common.zhipu_rerank import rerank
 
