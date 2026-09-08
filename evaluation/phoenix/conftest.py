@@ -11,7 +11,13 @@ from evaluation.phoenix import acceptance
 
 CRITERIA_PATH = str(pathlib.Path(__file__).parent / "criteria.yaml")
 
-_EXIT_ACCEPTANCE_FAILED = 3
+# 不用 3：pytest 保留 0-5 作为内置退出码（OK / TESTS_FAILED / INTERRUPTED /
+# INTERNAL_ERROR / USAGE_ERROR / NO_TESTS_COLLECTED），3 正好是 INTERNAL_ERROR。
+# 门禁功能上依然会红（sessionfinish 会覆盖 exitstatus），但如果下游 CI 对
+# "exit 3 = pytest 内部错误，可能是基础设施抖动"做特判自动重跑，就会把一次
+# 真实的 acceptance 失败误判成 infra 问题而重试掉。改用 6，落在 pytest 保留
+# 区间（0-5）之外，专属本门禁的"acceptance 未达标"含义（见 docs/CD-pipeline.md）。
+_EXIT_ACCEPTANCE_FAILED = 6
 
 
 def pytest_configure(config):

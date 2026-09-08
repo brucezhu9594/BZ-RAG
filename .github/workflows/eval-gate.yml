@@ -1,0 +1,59 @@
+name: Eval Gate
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    # 真管线依赖本机 Milvus(19530) 与本机 Phoenix(6006)，云 runner 碰不到，
+    # 所以必须钉在装了这两个服务的机器上（标签 bz-rag-local）。
+    runs-on: [self-hosted, bz-rag-local]
+    timeout-minutes: 30
+    env:
+      NO_PROXY: localhost,127.0.0.1
+      no_proxy: localhost,127.0.0.1
+      PHOENIX_ENDPOINT: http://localhost:6006
+      PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
+      PHOENIX_PROJECT_NAME: bz-rag-ci
+      # 并发跑同名 dataset 会互相 prune 例子（Arize 官方明说），按分支隔离。
+      PHOENIX_TEST_DATASET: bz-rag-golden-${{ github.ref_name }}
+      # PR 只跑 smoke 子集控制判官调用量；master 跑全量并重复 2 次压方差。
+      EVAL_REPETITIONS: ${{ github.event_name == 'pull_request' && '1' || '2' }}
+      # 判官凭证（JUDGE_OPENAI_API_KEY / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID）
+      # 有意不放这里、也不进 GitHub Secrets：runner 跑在本机，evaluation/phoenix/
+      # evaluators.py 顶部的 load_dotenv() 会读到仓库根目录下（已 gitignore 的）
+      # .env，缺任一个变量会在 pytest 收集阶段就报可读错误。
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
+      # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+
+      # phoenix.otel.register() 不做连通性检查：Phoenix 宕机时它依然返回成功，
+      # trace 却零产出，所以这一步不能省。带超时，避免 Phoenix 没起来时卡死 job。
+      - name: Check Phoenix is up
+        run: |
+          curl -s -o /dev/null -w "phoenix=%{http_code}\n" --max-time 10 --fail http://localhost:6006
+
+      # --import-mode=importlib 是必需的：evaluation/phoenix/ 这个目录名和已安装的
+      # phoenix 包在 pytest 默认 prepend 模式下冲突，会在 conftest 加载阶段就
+      # ModuleNotFoundError 崩掉（见 docs/CD-pipeline.md 对应条目），不加这个 flag
+      # 两条门禁命令都跑不起来，且报错跟真因几乎无法联想到一起。
+      - name: Run eval gate (PR = smoke subset)
+        if: github.event_name == 'pull_request'
+        run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -m smoke -q
+
+      - name: Run eval gate (master = full)
+        if: github.event_name == 'push'
+        run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -q
