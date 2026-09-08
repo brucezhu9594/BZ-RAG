@@ -21,8 +21,11 @@ jobs:
       PHOENIX_ENDPOINT: http://localhost:6006
       PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
       PHOENIX_PROJECT_NAME: bz-rag-ci
-      # 并发跑同名 dataset 会互相 prune 例子（Arize 官方明说），按分支隔离。
-      PHOENIX_TEST_DATASET: bz-rag-golden-${{ github.ref_name }}
+      # 并发跑同名 dataset 会互相 prune 例子（Arize 官方明说），按源分支隔离。
+      # 注意不能直接用 github.ref_name：PR 事件下它是 "<PR号>/merge"（带斜杠，
+      # 且不是分支名），所以优先取 head_ref（只有 PR 事件才有值，就是源分支名），
+      # push 事件下 head_ref 为空则回退到 ref_name（此时它就是分支名）。
+      PHOENIX_TEST_DATASET: bz-rag-golden-${{ github.head_ref || github.ref_name }}
       # PR 只跑 smoke 子集控制判官调用量；master 跑全量并重复 2 次压方差。
       EVAL_REPETITIONS: ${{ github.event_name == 'pull_request' && '1' || '2' }}
       # 判官凭证（JUDGE_OPENAI_API_KEY / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID）
@@ -36,15 +39,23 @@ jobs:
 
       # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
       # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
+      # 注意：这一步是否是"廉价空操作"取决于 runner 服务实际以哪个 Windows 账户
+      # 运行——依赖装在了 ci24871 的 per-user site-packages 下，见 docs/CD-pipeline.md
+      # 对应条目；账户不对时这里会从零重装 torch/transformers/langchain/mlflow 等，
+      # 且可能与 30 分钟的 timeout-minutes 抢时间。
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
 
       # phoenix.otel.register() 不做连通性检查：Phoenix 宕机时它依然返回成功，
-      # trace 却零产出，所以这一步不能省。带超时，避免 Phoenix 没起来时卡死 job。
+      # trace 却零产出，所以这一步不能省。打 /readyz 而不是根路径：根路径乃至
+      # 任意不存在的路径都被前端 SPA 的 catch-all 兜成 200，只能证明"6006 端口
+      # 上有 HTTP server"；/readyz 是 Phoenix 自己暴露的就绪探针（服务端内部真的
+      # 执行一次 select 1 探数据库连通性），能覆盖"进程活着但连不上库、记不了
+      # trace"这个真实失败模式。带超时，避免 Phoenix 没起来时卡死 job。
       - name: Check Phoenix is up
         run: |
-          curl -s -o /dev/null -w "phoenix=%{http_code}\n" --max-time 10 --fail http://localhost:6006
+          curl -s -o /dev/null -w "phoenix=%{http_code}\n" --max-time 10 --fail http://localhost:6006/readyz
 
       # --import-mode=importlib 是必需的：evaluation/phoenix/ 这个目录名和已安装的
       # phoenix 包在 pytest 默认 prepend 模式下冲突，会在 conftest 加载阶段就

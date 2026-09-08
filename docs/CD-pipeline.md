@@ -270,10 +270,33 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
   "装了 Milvus/Phoenix 的那台机器"上，直接用机器自带解释器比额外装一份更贴近真实场景。
   `.python-version` 里记的 3.10 仍然只服务云 runner 那几个 workflow，两者互不冲突，
   不需要因为这条门禁去改它。
+- **runner 服务必须以装了依赖的那个 Windows 账户运行**：实测发现 `phoenix` / `pytest` /
+  `pandas` / `dotenv` 等一大票依赖，实际只装在了 `ci24871` 这个用户的 per-user
+  site-packages（`C:\Users\ci24871\AppData\Roaming\Python\Python314\site-packages`，
+  665 个条目），而不是 `C:\Python314\Lib\site-packages`（只有 2 个条目）。Windows 上
+  per-user site-packages 是否可见，取决于**运行进程的账户**，不取决于调用的是哪个
+  `python.exe`。self-hosted runner 装成 Windows 服务时**默认不以交互式用户身份跑**，
+  如果注册时没指定账户，`eval-gate.yml` 第一次真跑大概率在 `pip install` 之后的
+  `pytest evaluation/phoenix ...` 这步炸 `ModuleNotFoundError`（甚至 `pytest` 命令本身
+  在那个账户的 PATH 上都可能找不到），**症状和"忘了 pip install"完全一样，容易把排障
+  方向带偏**。解决办法二选一：① 注册 runner 服务时指定 `--windowslogonaccount`，让服务
+  以 `ci24871` 这个账户运行（这台机器现在的做法）；② 更彻底的替代方案是把依赖装到系统级
+  `site-packages`，或者建一个固定路径的虚拟环境、workflow 里用它的绝对路径调用
+  `python`/`pip`——这样门禁就不再依赖"runner 服务恰好以哪个账户运行"这个隐藏前提。
+  这个前提如果不对，`Install dependencies` 那一步也不再是"廉价空操作"：它会从零重装
+  torch/transformers/langchain/mlflow 等一整套依赖，可能与 30 分钟的 `timeout-minutes`
+  抢时间。
+- **健康检查打的是 `/readyz` 而不是根路径 `/`**：Phoenix 前端是个 SPA，根路径乃至任意
+  不存在的路径都会被前端的 catch-all 路由兜成 200，所以打根路径只能证明"6006 端口上有
+  个 HTTP server 在听"，对"进程活着但连不上数据库、记不了 trace"这个真实失败模式
+  （`phoenix.otel.register()` 不做连通性检查，这种情况下端点照样 200）零覆盖。`/readyz`
+  是 Phoenix 自己暴露的就绪探针，服务端内部真的会执行一次 `select 1` 探数据库连通性，
+  能覆盖到这个失败模式。
 - **全量规模（n=48：24 条 case × 2 次 repetitions）在开发阶段没有被完整跑完过**（只验证到
   17/48 就手动停了），所以**第一次 push 到 master 触发 `eval-gate` 跑全量，实际上就是
   这条路径的首次真实验证**。预计要跑 240 次判官调用 + 48 次完整 RAG 管线，10-20 分钟，
-  首次跑建议盯着 Actions 日志看到底，别把中途卡住当成"还在跑"。
+  首次跑建议盯着 Actions 日志看到底，别把中途卡住当成"还在跑"。（这条提示是一次性的——
+  首次全量跑验证通过、确认过程稳定之后，可以把这条从文档里删掉。）
 
 辅助 shell 脚本（被 workflow 调用）：
 
