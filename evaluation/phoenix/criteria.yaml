@@ -1,25 +1,44 @@
 # 离线门禁与线上 monitor 共用的阈值声明。
 # metric: average   —— 均值必须过 threshold（direction: maximize 默认 / minimize）
 # metric: pass_rate —— 每条按 pass_when 判通过，通过比例必须达到 min_pass_rate
+#
+# offline 段的 min_samples / max_error_rate（Ruling R18）：
+#   min_samples: 2   —— smoke 跑 3 条（SMOKE_SIZE=3 × repetitions=1），设 2
+#                        可以容忍一次瞬时判官失败而不误红 PR，同时挡住 smoke
+#                        规模上的大面积失败。
+#   max_error_rate:  —— min_samples 在 master 全量规模上兜不住（比如 48 条
+#     0.2               预期里 40 errored + 8 好，usable=8 一样能过
+#                        min_samples）；错误率是与样本规模无关的判据，交给
+#                        它兜底。
 offline:
   - annotation: faithfulness
     metric: average
     threshold: 0.8
+    min_samples: 2
+    max_error_rate: 0.2
   - annotation: faithfulness
     metric: pass_rate
     pass_when: "score >= 0.5"
     min_pass_rate: 0.9
+    min_samples: 2
+    max_error_rate: 0.2
   - annotation: answer_relevancy
     metric: average
     threshold: 0.8
+    min_samples: 2
+    max_error_rate: 0.2
   - annotation: contextual_recall
     metric: pass_rate
     pass_when: "label != 'incorrect'"
     min_pass_rate: 1.0
+    min_samples: 2
+    max_error_rate: 0.2
   - annotation: refusal_check
     metric: pass_rate
     pass_when: "label == 'ok'"
     min_pass_rate: 1.0
+    min_samples: 2
+    max_error_rate: 0.2
 
 # 期 3 用；线上比离线松一档，且样本量不足要判 hold 而不是通过。
 online:

@@ -83,14 +83,18 @@ def test_errored_judgement_is_a_third_state_not_a_zero():
 
 
 def test_all_criteria_are_evaluated_even_when_the_first_fails():
+    # Ruling R21：两条都 FAIL 无法区分"第二条真的被独立求值"与"只是拿到一个
+    # 占位 Outcome"。改成第一条 FAIL、第二条 PASS，断言 outs[1].passed 为真，
+    # 才是真的在验证"全部跑完再判"而不是"反正都不通过看不出差别"。
     acc.record("a", 0.0)
-    acc.record("b", 0.0)
+    acc.record("b", 1.0)
     outs = acc.evaluate_all(
         [acc.Criterion(annotation="a", metric="average", threshold=0.5),
          acc.Criterion(annotation="b", metric="average", threshold=0.5)]
     )
     assert len(outs) == 2
-    assert not any(o.passed for o in outs)
+    assert not outs[0].passed
+    assert outs[1].passed
 
 
 def test_min_samples_yields_insufficient_not_pass():
@@ -190,3 +194,132 @@ def test_pass_when_unsupported_comparison_operator_raises_value_error():
         acc._eval_pass_when("label is 'ok'", rec)
     with pytest.raises(ValueError):
         acc._eval_pass_when("1.0 is score", rec)
+
+
+# ——— Task review (opus) 复核后的四条修复：R18-R21 ———
+
+
+def test_average_with_only_non_numeric_scores_fails_with_clear_reason():
+    # Ruling R21 (a)：取舍 2 点名的情形——"average 无任何数值"这个具名失败态
+    # 之前 0 测试覆盖。record 了但 score 本身是 None（不是 errored，只是没有
+    # 数值），必须落进 "no ... numeric scores found" 分支而不是被当成 0 或
+    # 被别的分支悄悄吞掉。
+    acc.record("faithfulness", None)
+    (out,) = acc.evaluate_all([_crit()])
+    assert not out.passed
+    assert "numeric" in out.reason
+
+
+def test_scoreboard_surfaces_errored_count_even_when_criterion_passes():
+    # Ruling R18 (a)：即使 metric 逻辑本身判 PASS（这里只有 1 条有效样本，
+    # min_samples=1，均值 1.0 达标），只要这批记录里有 errored，记分卡也必须
+    # 无条件呈现——否则"19 次判官报错、只有 1 次有效"这种事在人看得见的输出
+    # 里彻底隐形（这正是 review 实测出的原始漏洞：19/20 errored 时两条
+    # faithfulness criteria 都 PASS，且 "errored" in board 是 False）。
+    acc.record("faithfulness", 1.0)
+    for _ in range(19):
+        acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, min_samples=1)])
+    assert out.passed
+    board = acc.format_scoreboard([out])
+    assert "errored" in board
+
+
+def test_max_error_rate_out_of_range_rejected_at_construction():
+    with pytest.raises(ValueError):
+        _crit(max_error_rate=1.5)
+    with pytest.raises(ValueError):
+        _crit(max_error_rate=-0.1)
+
+
+def test_max_error_rate_boundary_exactly_at_threshold_does_not_trigger_the_gate():
+    # Ruling R18 (b) 边界：errored=1, usable=4 → error_rate=0.2，恰好等于
+    # max_error_rate，不应该触发这道门（用严格 >），交给后面的 metric 逻辑
+    # 正常判定；4 个 1.0 的均值仍然 1.0 >= 0.8。
+    for s in (1.0, 1.0, 1.0, 1.0):
+        acc.record("faithfulness", s)
+    acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2)])
+    assert "exceeds max_error_rate" not in out.reason
+    assert out.passed
+
+
+def test_max_error_rate_boundary_just_above_threshold_triggers_the_gate():
+    # Ruling R18 (b) 边界：errored=2, usable=4 → error_rate=0.333 > 0.2，
+    # 必须直接 FAIL——即使 usable=4 早就够 min_samples，也不能被 min_samples
+    # 或 metric 逻辑盖过去。这正是 review 指出的"min_samples 在规模变大后失效，
+    # 需要一个与规模无关的判据"。
+    for s in (1.0, 1.0, 1.0, 1.0):
+        acc.record("faithfulness", s)
+    acc.record("faithfulness", None, error="judge timeout")
+    acc.record("faithfulness", None, error="judge timeout")
+    (out,) = acc.evaluate_all(
+        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
+    )
+    assert not out.passed
+    assert "exceeds max_error_rate" in out.reason
+    assert "errored" in out.reason
+
+
+def test_max_error_rate_blocks_the_19_of_20_errored_scenario():
+    # Ruling R18 核心场景复现：20 次判官调用，19 次 errored + 1 次拿到 1.0。
+    # 修复前两条 faithfulness criteria 都判 PASS 且记分卡完全看不出 errored。
+    # 修复后：max_error_rate 挡住它，两条都判 FAIL，且 errored 计数在 reason
+    # 与记分卡里都清楚可见。
+    acc.record("faithfulness", 1.0)
+    for _ in range(19):
+        acc.record("faithfulness", None, error="judge timeout")
+    outs = acc.evaluate_all(
+        [
+            acc.Criterion(annotation="faithfulness", metric="average",
+                          threshold=0.8, max_error_rate=0.2),
+            acc.Criterion(annotation="faithfulness", metric="pass_rate",
+                          pass_when="score >= 0.5", min_pass_rate=0.9,
+                          max_error_rate=0.2),
+        ]
+    )
+    assert len(outs) == 2
+    assert not any(o.passed for o in outs)
+    assert all("errored" in o.reason for o in outs)
+    board = acc.format_scoreboard(outs)
+    assert "FAIL" in board
+    assert "errored" in board
+
+
+def test_pass_when_syntax_error_is_caught_at_construction_not_after_the_fact():
+    # Ruling R20 (a)：YAML 里把 pass_when 写残了（比如少打一半），必须在
+    # Criterion 构造期就报 SyntaxError，而不是烧完所有判官调用、跑到
+    # evaluate_all 最后一步才引爆、把已经算好的其它 criteria 结果一并丢光。
+    with pytest.raises(SyntaxError):
+        acc.Criterion(annotation="faithfulness", metric="pass_rate",
+                      pass_when="score >=", min_pass_rate=0.9)
+
+
+def test_pass_when_bad_operator_is_caught_at_construction():
+    # Ruling R20 (a)：白名单外的运算符（is/in 等）同样要在构造期就报
+    # ValueError，不用等到 evaluate_all 才发现。
+    with pytest.raises(ValueError):
+        acc.Criterion(annotation="faithfulness", metric="pass_rate",
+                      pass_when="label is 'ok'", min_pass_rate=0.9)
+
+
+def test_evaluate_all_survives_a_pass_when_type_error_and_still_scores_the_rest():
+    # Ruling R19/R20 (b) 核心证据：pass_when 里常量类型和 score 的实际类型
+    # 对不上（"score >= 'abc'"）这种问题没法在构造期发现——必须真的比较到
+    # 具体值才会抛 TypeError。这是三类逃逸异常里唯一一个前移校验覆盖不到的，
+    # 只能在 _evaluate_one 里用运行时 try/except 兜底。这里验证 evaluate_all
+    # 真的不会被它炸穿：第一条判成"配置有问题"的 FAIL，第二条正常算出 PASS，
+    # 不受第一条连累——这才是"就地显形而不是拖垮整批"这句话第一次成立。
+    acc.record("a", 0.9)
+    acc.record("b", 1.0)
+    outs = acc.evaluate_all(
+        [
+            acc.Criterion(annotation="a", metric="pass_rate",
+                          pass_when="score >= 'abc'", min_pass_rate=0.9),
+            acc.Criterion(annotation="b", metric="average", threshold=0.5),
+        ]
+    )
+    assert len(outs) == 2
+    assert not outs[0].passed
+    assert "invalid pass_when" in outs[0].reason
+    assert outs[1].passed
