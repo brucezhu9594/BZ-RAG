@@ -1,3 +1,30 @@
+# [1.4.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.3.0...v1.4.0) (2026-09-09)
+
+
+### Bug Fixes
+
+* **eval:** _rerank 换成 RERANKER kind（R13） ([9e6e124](https://github.com/brucezhu9594/BZ-RAG/commit/9e6e124c959880741070c3f2cdbdf9ecd34e09b1))
+* **eval-gate:** 门禁转入观测态，提高超时余量，拆分评估依赖，修复GBK乱码 ([168ea81](https://github.com/brucezhu9594/BZ-RAG/commit/168ea81c056c0bf07fe8279325771b894ca9ecbc))
+* **eval:** phoenix-up.ps1 PATH 无关启动 + 显式守卫；.env.example 补 PHOENIX_ENDPOINT ([c83623c](https://github.com/brucezhu9594/BZ-RAG/commit/c83623c3764799e2ddf896e7c698440d22feb693))
+* **eval:** phoenix-up.ps1 避免探测分支被 Stop+stderr 重定向炸出 NativeCommandError ([b15284b](https://github.com/brucezhu9594/BZ-RAG/commit/b15284b09452d4fe9b60a2f57bf4ee63201f39b9))
+* **eval:** smoke 子集改为内容锚定（哈希排序取前 3），不再锚在文件行序上 ([c57343e](https://github.com/brucezhu9594/BZ-RAG/commit/c57343e6574d81df967f68d941b89c6329860942))
+* **eval:** smoke 子集测试改为调用生产代码的 smoke_ids()，不再平行重实现选取规则 ([922d633](https://github.com/brucezhu9594/BZ-RAG/commit/922d633734dc4aaa997ceb2fe40c5abb84ed7223))
+* **eval:** 判官大面积报错时门禁仍绿灯 + pass_when 前移校验 + 真containment ([378ccd2](https://github.com/brucezhu9594/BZ-RAG/commit/378ccd281e26d8f7e3339119184101343be91ca4))
+* **eval:** 提取动作纳入 try 保护范围 + 配置缺失 eager 快速失败 ([07cd9ff](https://github.com/brucezhu9594/BZ-RAG/commit/07cd9ffe48863d9db0d8c1988268b67e0ffe30c2))
+* **eval:** 错误率闸门改绝对下限+比例、记分卡标记改ASCII、Criterion可JSON化 ([90349d9](https://github.com/brucezhu9594/BZ-RAG/commit/90349d9eb643ff9670c49f499e1839c150f865f9))
+* **phoenix-acceptance:** 检测判官落库失败的静默丢样本，criteria.yaml 提前校验 ([ba27625](https://github.com/brucezhu9594/BZ-RAG/commit/ba2762580084bfd3ed65dd2e3157ccac8486f0df))
+* **retrieval:** 重排不再系统性挑中检索结果里最差的几条 ([94677fe](https://github.com/brucezhu9594/BZ-RAG/commit/94677fee620677b0f2561f03a36cb724e9f7a97e))
+
+
+### Features
+
+* **eval:** golden 集内容寻址 example_id + 推送 Phoenix dataset ([f5067fa](https://github.com/brucezhu9594/BZ-RAG/commit/f5067fa4b4b3156e42ab4d5021554b62bd7ed58e))
+* **eval:** Phoenix 埋点版 Milvus RAG 管线 + query-phoenix 端点 ([12a6dd6](https://github.com/brucezhu9594/BZ-RAG/commit/12a6dd647abacdba96b8eece35fb20a04662b023))
+* **eval:** Phoenix 离线门禁套件，退出码即门禁 ([bc9c4ca](https://github.com/brucezhu9594/BZ-RAG/commit/bc9c4cac92cbcbd5308b5d527a8b1053462916da))
+* **eval:** Phoenix 评估栈依赖与本地启动脚本 ([c5e0ad9](https://github.com/brucezhu9594/BZ-RAG/commit/c5e0ad9b17af35927ba2f1f3b8f8a290b047cee9))
+* **eval:** 五个分类式判官（MiniMax-m3），判官失败落 errored 第三态 ([ef9d818](https://github.com/brucezhu9594/BZ-RAG/commit/ef9d81829d4a76beb12cd49c54424b326b36b482))
+* **eval:** 声明式验收条件（Arize acceptanceCriteria 的 Python 版） ([30c730d](https://github.com/brucezhu9594/BZ-RAG/commit/30c730d40d184bfb9b9f227ab012a699c8fb6af6))
+
 # [1.3.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.2.0...v1.3.0) (2026-09-08)
 
 
