@@ -1,3 +1,11 @@
+## [1.4.5](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.4...v1.4.5) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ci:** eval-gate 装进独立 venv，不再污染 runner 账户的 site-packages ([890bdd8](https://github.com/brucezhu9594/BZ-RAG/commit/890bdd8d6ffa178f0e5b82383d45523d44fea57e))
+* **deps:** 移除 zhipuai，embedding 改走 zai-sdk，解开 pyjwt 的不可满足约束 ([c8bdf6f](https://github.com/brucezhu9594/BZ-RAG/commit/c8bdf6fd0ccb8aae74f1409269787ab8fb370f7c))
+
 ## [1.4.4](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.3...v1.4.4) (2026-09-09)
 
 
