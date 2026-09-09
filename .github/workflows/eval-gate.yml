@@ -44,14 +44,54 @@ jobs:
       PHOENIX_TEST_DATASET: bz-rag-golden-${{ github.head_ref || github.ref_name }}
       # PR 只跑 smoke 子集控制判官调用量；master 跑全量并重复 2 次压方差。
       EVAL_REPETITIONS: ${{ github.event_name == 'pull_request' && '1' || '2' }}
-      # 判官凭证（JUDGE_OPENAI_API_KEY / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID）
-      # 有意不放这里、也不进 GitHub Secrets：runner 跑在本机，evaluation/phoenix/
-      # evaluators.py 顶部的 load_dotenv() 会读到仓库根目录下（已 gitignore 的）
-      # .env，缺任一个变量会在 pytest 收集阶段就报可读错误。
+      # 凭证必须显式注入。这里原先写的是「有意不放 GitHub Secrets：runner 跑在
+      # 本机，load_dotenv() 会读到仓库根目录下（已 gitignore 的）.env」——**那个
+      # 推理是错的**，而且因为 runner 一直没注册、门禁从没在 CI 上真跑过，这个洞
+      # 一直没暴露。runner 每次 actions/checkout 出来的是全新工作目录
+      # （C:\actions-runner\_work\BZ-RAG\BZ-RAG），.env 在 .gitignore 里不会进
+      # checkout，find_dotenv() 一路往上也找不到。实测：对仓库做一次干净 clone
+      # 后 import evaluation.phoenix.evaluators，直接抛
+      # 「RuntimeError: 判官配置缺失：JUDGE_OPENAI_API_KEY, ...」——门禁会在 pytest
+      # 收集阶段就红，报错原因与被测质量毫无关系。
+      #
+      # 需要在仓库 Settings > Secrets and variables > Actions 里配好：
+      #   Secrets   : OPENAI_API_KEY / ZHIPUAI_API_KEY / JUDGE_OPENAI_API_KEY
+      #   Variables : OPENAI_BASE_URL / MODEL_ID / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID
+      # 端点与模型名放 Variables 而不是 Secrets，是为了让它们在日志里可见——
+      # 判官供应商漂移是本项目已知的可比性风险（见 docs 设计文档 §8），把模型名
+      # 掩成 *** 会让排查这类问题变难。
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZHIPUAI_API_KEY: ${{ secrets.ZHIPUAI_API_KEY }}
+      JUDGE_OPENAI_API_KEY: ${{ secrets.JUDGE_OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+      MODEL_ID: ${{ vars.MODEL_ID }}
+      JUDGE_OPENAI_BASE_URL: ${{ vars.JUDGE_OPENAI_BASE_URL }}
+      JUDGE_MODEL_ID: ${{ vars.JUDGE_MODEL_ID }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 放在 pip install 之前：缺变量时立刻红，省掉两分钟依赖安装，且错误信息
+      # 直接点名缺哪个。否则症状是 pytest 收集阶段抛「判官配置缺失」（只覆盖
+      # JUDGE_* 三个），而 MODEL_ID / ZHIPUAI_API_KEY 缺失还要更晚、在第一次真调
+      # 管线时才炸，报错离真因更远。
+      - name: Preflight - 校验凭证已注入
+        shell: bash
+        run: |
+          missing=()
+          for v in OPENAI_API_KEY ZHIPUAI_API_KEY JUDGE_OPENAI_API_KEY \
+                   OPENAI_BASE_URL MODEL_ID JUDGE_OPENAI_BASE_URL JUDGE_MODEL_ID; do
+            [ -n "${!v}" ] || missing+=("$v")
+          done
+          if [ ${#missing[@]} -ne 0 ]; then
+            echo "::error::缺少以下配置：${missing[*]}"
+            echo "在仓库 Settings > Secrets and variables > Actions 里补齐："
+            echo "  Secrets  : OPENAI_API_KEY / ZHIPUAI_API_KEY / JUDGE_OPENAI_API_KEY"
+            echo "  Variables: OPENAI_BASE_URL / MODEL_ID / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID"
+            exit 1
+          fi
+          echo "凭证齐全（judge=${JUDGE_MODEL_ID}, model=${MODEL_ID}）"
 
       # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
       # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
