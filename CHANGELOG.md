@@ -1,3 +1,10 @@
+## [1.4.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.0...v1.4.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **retrieval:** BM25 配中文分词，混合检索不再退化成纯 dense；评估门禁恢复阻断 ([1c73378](https://github.com/brucezhu9594/BZ-RAG/commit/1c73378ee91a3a911d276d2dd3992f0bd8ea46bf))
+
 # [1.4.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.3.0...v1.4.0) (2026-09-09)
 
 
