@@ -19,7 +19,11 @@ COLLECTION_NAME = "hewa_help_collection"
 DENSE_LIMIT = 10
 SPARSE_LIMIT = 10
 RETRIEVE_TOP_K = 6
-RERANK_TOP_K = 2
+# 4 而不是 2：chunk 的 p50 只有 161 字，top-2 喂给 LLM 的上下文才 ~320 字。实测存在
+# 金块排在 hybrid 第 3 位却被切掉的 case；而 rerank 分数在同话题候选上会饱和
+# （六条候选全 1.0，见 common/zhipu_rerank.py 的注释），并列时只能退回 RRF 名次，
+# 留 2 个位置的余量太薄。
+RERANK_TOP_K = 4
 RRF_K = 60
 MAX_HISTORY_ROUNDS = 3  # 保留最近 N 轮对话
 

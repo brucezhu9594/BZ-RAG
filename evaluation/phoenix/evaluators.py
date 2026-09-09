@@ -109,8 +109,24 @@ ok = 给出了实质性回答；refused = 拒答或声称无法回答；empty = 
 
 
 def _classifier(name: str, template: str, choices: dict[str, float]) -> ClassificationEvaluator:
+    # temperature=0：ClassificationEvaluator 的 **kwargs 会存进 invocation_parameters
+    # 并透传到 llm.generate_classification(...) → generate_object(...) → SDK
+    # （已读 phoenix/evals/evaluators.py:567,752 与 llm/wrapper.py:310,350 确认）。
+    #
+    # 诚实标注：这不是判官漂移的主因。实测把三条失败 case 的原始 payload 逐字回放
+    # 各 6 次，默认温度与 temperature=0 的标签**完全相同**（且各自 6/6 稳定），
+    # 但其中两条的回放结果与跑批时记录的标签不一致。剩下的嫌疑是设计文档 §8 已
+    # 列为风险的判官供应商漂移（minimax-m3 经 Vercel AI Gateway 路由，实测落
+    # fireworks，另有 minimax/nebius/gmicloud/morph 四个 fallback），25 分钟的
+    # 跑批里会漂到不同 provider，短时回放则命中同一个。
+    # 固定温度消掉的是采样这一个变量，值得设，但别指望它解决方差。
     return ClassificationEvaluator(
-        name=name, prompt_template=template, llm=_llm, choices=choices, direction="maximize"
+        name=name,
+        prompt_template=template,
+        llm=_llm,
+        choices=choices,
+        direction="maximize",
+        temperature=0,
     )
 
 

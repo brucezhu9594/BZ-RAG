@@ -15,6 +15,12 @@ import os
 os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1")
 os.environ.setdefault("no_proxy", "localhost,127.0.0.1")
 
+# 门禁要的是可复现的基线，所以被测管线必须确定性——必须在 import
+# api.milvus_rag_phoenix 之前设好（那边在调用时读，这里 setdefault 只是保证
+# 默认值；想跑生产采样行为就在外面显式导出 GENERATION_TEMPERATURE=0.7）。
+# 生产入口 api/milvus_rag.py 不受影响，仍是 0.7。
+os.environ.setdefault("GENERATION_TEMPERATURE", "0")
+
 import pytest
 
 from api.milvus_rag_phoenix import milvus_rag_phoenix_query_with_context

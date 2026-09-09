@@ -34,7 +34,11 @@ COLLECTION_NAME = "hewa_help_collection"
 DENSE_LIMIT = 10
 SPARSE_LIMIT = 10
 RETRIEVE_TOP_K = 6
-RERANK_TOP_K = 2
+# 4 而不是 2：chunk 的 p50 只有 161 字，top-2 喂给 LLM 的上下文才 ~320 字。实测存在
+# 金块排在 hybrid 第 3 位却被切掉的 case；而 rerank 分数在同话题候选上会饱和
+# （六条候选全 1.0，见 common/zhipu_rerank.py 的注释），并列时只能退回 RRF 名次，
+# 留 2 个位置的余量太薄。
+RERANK_TOP_K = 4
 RRF_K = 60
 
 # project_name 由环境变量决定：CI 里 bz-rag-ci，影子 canary 上 bz-rag-canary。
@@ -104,7 +108,18 @@ def _rerank(query: str, docs: list[Document]) -> list[Document]:
 
 @_tracer.chain
 def _generate(query: str, context: str, history: list[tuple[str, str]] | None = None) -> str:
-    llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=0.7, request_timeout=60)
+    # 生成温度可配置，默认 0.7 与生产 (api/milvus_rag.py) 一致；离线门禁把
+    # GENERATION_TEMPERATURE 设成 0（见 evaluation/phoenix/test_rag_eval.py 顶部）。
+    # 原因：temperature=0.7 的被测对象每次跑出的答案实质不同，判官标签随之漂移，
+    # 基线就不可复现、阈值也无从校准。实测两次全量跑之间，24 条 case 里
+    # contextual_precision 有 11 条、contextual_recall 有 8 条标签翻转，且改善与
+    # 退化大致对半——任何改动的真实效果都被这层噪声盖住。
+    #
+    # 有意在调用时读环境变量，而不是 import 期定成模块常量：本仓库已经因为
+    # "谁先 import" 在 NO_PROXY 上踩过三次坑，评估入口设置环境变量的时机不该
+    # 再和本模块的导入顺序耦合。
+    temperature = float(os.environ.get("GENERATION_TEMPERATURE", "0.7"))
+    llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=temperature, request_timeout=60)
     system_prompt = (
         "你是一个知识库检索助手。"
         "下面「检索结果」来自知识库片段，请仅依据这些内容回答用户问题。"

@@ -25,8 +25,21 @@ def etl():
 
     schema = client.create_schema(auto_id=True, enable_dynamic_field=True)
     schema.add_field("id", DataType.INT64, is_primary=True)
+    # analyzer_params 必须显式指定中文分词。不给这个参数时 Milvus 用默认的
+    # standard 分析器——它按空白/标点切，对中文等于不分词，标点之间的整段中文
+    # 会变成一个 token。后果是 BM25 只在「查询串恰好等于某个标点夹出来的完整
+    # 片段」时才命中，实测：查 '蛙贝' 0 条（遍布全库，但总嵌在「扣除5蛙贝」这类
+    # 更长的串里）、查 '人力资源供应链内容生态平台' 0 条（这串字面就在库里）。
+    # 在 24 条金标问题上，BM25 返回 0 条结果的有 22 条，RRF 融合结果与纯 dense
+    # 完全相同的也是 22 条——所谓混合检索在 92% 的查询上是纯 dense，稀疏这一路
+    # 白建了，RRFRanker 一直在跟空结果做融合。
     schema.add_field(
-        "text", DataType.VARCHAR, max_length=65535, enable_analyzer=True, enable_match=True
+        "text",
+        DataType.VARCHAR,
+        max_length=65535,
+        enable_analyzer=True,
+        enable_match=True,
+        analyzer_params={"type": "chinese"},
     )
     schema.add_field("vector", DataType.FLOAT_VECTOR, dim=dim)
     schema.add_field("sparse_vector", DataType.SPARSE_FLOAT_VECTOR)

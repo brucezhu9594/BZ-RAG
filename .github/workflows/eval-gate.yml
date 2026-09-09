@@ -84,24 +84,19 @@ jobs:
       # phoenix 包在 pytest 默认 prepend 模式下冲突，会在 conftest 加载阶段就
       # ModuleNotFoundError 崩掉（见 docs/CD-pipeline.md 对应条目），不加这个 flag
       # 两条门禁命令都跑不起来，且报错跟真因几乎无法联想到一起。
-      # C1（最终整支 review）：门禁目前处于**临时观测态**，两个 `Run eval gate`
-      # 步骤都加了 continue-on-error，不会阻断 PR / push。原因：criteria.yaml
-      # 里的阈值（0.8/0.9/1.0）从未在真实基线上验证过就写了进去，实测（两次独立
-      # smoke 跑一致）发现在完全没改代码的情况下，5 条 acceptance criteria 里有
-      # 2 条（answer_relevancy/average、refusal_check/pass_rate）恒为 FAIL——
-      # 门禁在未改动的基线上就是红的。裁决是不把阈值改低去迁就现状（那是拿结果
-      # 配尺子），而是先让它不挡人，校准完判官口径/阈值之后再摘掉这两行
-      # continue-on-error。实测基线表、诊断线索与校准建议见
-      # docs/CD-pipeline.md §4.5「当前状态：门禁处于观测态」。
-      # TODO(校准完成后删除)：判官口径校准完、能稳定绿之后，删掉下面两步的
-      # `continue-on-error: true`，并把 docs/CD-pipeline.md §4.5 的自验步骤重新
-      # 走一遍确认仍可复现。
+      # 观测态已于 2026-09-09 结束，两步的 continue-on-error 已摘除，门禁重新
+      # 阻断 PR / push。C1 当初判定"基线上就恒红"的两条 criteria
+      # （answer_relevancy/average、refusal_check/pass_rate）根因查清后都在管线侧，
+      # 不在阈值侧——修完三个 bug（重排倒序 + top_n 服务端截断、RERANK_TOP_K 余量
+      # 太薄、BM25 中文分词未配）后全量 24 条五条 criteria 全 PASS，
+      # **criteria.yaml 的阈值一个都没有下调**。详见 docs/CD-pipeline.md §4.5。
+      #
+      # 退出码约定：acceptance 未达标时 conftest 把退出码改写成 6（不用 3，
+      # 那是 pytest 的 INTERNAL_ERROR，怕下游 CI 特判成基础设施抖动自动重跑）。
       - name: Run eval gate (PR = smoke subset)
         if: github.event_name == 'pull_request'
-        continue-on-error: true
         run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -m smoke -q
 
       - name: Run eval gate (master = full)
         if: github.event_name == 'push'
-        continue-on-error: true
         run: pytest evaluation/phoenix -o addopts="" --import-mode=importlib -q
