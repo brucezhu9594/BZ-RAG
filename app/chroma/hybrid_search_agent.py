@@ -4,11 +4,11 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 from langchain_chroma import Chroma
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 
 from app.chroma.bm25_index import _tokenize, build_bm25_index
 from app.chroma.rrf import rrf_merge
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -21,7 +21,7 @@ FINAL_TOP_K = 2
 @tool(response_format="content_and_artifact")
 def retrieve_context(query: str):
     """根据用户问题检索知识库，返回相关文档片段。当用户提出任何问题时都应调用此工具。"""
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     vector_store = Chroma(
         collection_name="hewa_help_collection",
         embedding_function=embeddings,

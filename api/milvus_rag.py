@@ -6,17 +6,17 @@
 """
 import os
 
-from langchain_community.embeddings import ZhipuAIEmbeddings
-from langchain_core.documents import Document
-from langchain_openai import ChatOpenAI
-from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
-
 from deepeval.tracing import (
     observe,
     update_current_span,
     update_current_trace,
     update_retriever_span,
 )
+from langchain_core.documents import Document
+from langchain_openai import ChatOpenAI
+from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "hewa_help_collection"
@@ -33,7 +33,7 @@ RRF_K = 60
 
 @observe(type="retriever")
 def _retrieve_span(query: str) -> list[Document]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     client = MilvusClient(uri=MILVUS_URI)
     query_vector = embeddings.embed_query(query)
 

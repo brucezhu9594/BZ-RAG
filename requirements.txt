@@ -22,7 +22,17 @@ rank-bm25
 requests
 torch
 transformers
-zhipuai
+# 智谱只留 zai-sdk 这一个 SDK（embedding 见 common/zhipu_embed.py，OCR 见 common/ocr.py）。
+# 曾经 zhipuai 与 zai-sdk 并存，但两者的 pyjwt 约束**互相不可满足**：
+#   zhipuai 2.x  -> pyjwt>=2.8.0,<2.9.0
+#   zai-sdk      -> pyjwt>=2.9.0,<3.0.0
+# pip 只能靠把 zhipuai 一路回溯降级到 1.0.7（老版本不 pin pyjwt）来"解决"，
+# 而 1.0.7 的 API 完全不同，langchain_community 那边直接
+# ImportError: Could not import zhipuai python package。
+# 本地一直没暴露是因为环境里早装了 zhipuai 2.x，pip 只说 already satisfied；
+# 直到评估门禁第一次真在 CI 上做全新解析才炸出来（48 项全挂），
+# 而 NIXPACKS 全新构建生产镜像时装到的同样是这个坏版本。
+# 换掉之后 pyjwt 的约束不再互斥，下面那条 CVE 安全约束才真正可满足。
 zai-sdk
 deepeval
 langfuse

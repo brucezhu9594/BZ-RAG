@@ -5,8 +5,9 @@ import pathlib
 
 import lancedb
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -16,7 +17,7 @@ DB_PATH = str(pathlib.Path(__file__).parent / "db")
 
 
 def _retrieve(query: str) -> tuple[str, list]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     db = lancedb.connect(DB_PATH)
     tbl = db.open_table(COLLECTION_NAME)
 

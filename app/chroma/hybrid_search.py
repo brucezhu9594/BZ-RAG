@@ -2,7 +2,6 @@ import os
 
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 
@@ -10,6 +9,7 @@ from app.chroma.bm25_index import _tokenize, build_bm25_index
 from app.chroma.rrf import rrf_merge
 from common.query_expansion import expand_query
 from common.reranker import rerank
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -23,7 +23,7 @@ RERANK_TOP_K = 2
 def _get_vector_store() -> Chroma:
     return Chroma(
         collection_name="hewa_help_collection",
-        embedding_function=ZhipuAIEmbeddings(model="embedding-3"),
+        embedding_function=ZhipuEmbeddings(model="embedding-3"),
         persist_directory="./db",
     )
 

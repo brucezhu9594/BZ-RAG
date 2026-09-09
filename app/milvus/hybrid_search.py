@@ -1,14 +1,14 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
+from langfuse import observe
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
 from common.contextual_rewriter import contextual_rewrite
+from common.zhipu_embed import ZhipuEmbeddings
 from common.zhipu_rerank import rerank
-from langfuse import observe
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -35,7 +35,7 @@ def _retrieve(query: str, history: list[dict] | None = None) -> tuple[str, list[
     if rewritten != query:
         print(f"[历史感知改写] {query} → {rewritten}")
 
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     client = MilvusClient(uri=MILVUS_URI)
 
     query_vector = embeddings.embed_query(rewritten)

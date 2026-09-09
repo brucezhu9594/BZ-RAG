@@ -1,9 +1,10 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from pymilvus import MilvusClient
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -13,7 +14,7 @@ COLLECTION_NAME = "hewa_help_collection"
 
 
 def _retrieve_for_query(query: str) -> tuple[str, list[dict]]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     client = MilvusClient(uri=MILVUS_URI)
 
     query_vector = embeddings.embed_query(query)

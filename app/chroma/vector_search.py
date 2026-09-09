@@ -2,15 +2,16 @@ import os
 
 from dotenv import load_dotenv
 from langchain_chroma import Chroma
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
 
 
 def _retrieve_for_query(query: str) -> tuple[str, list]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     vector_store = Chroma(
         collection_name="hewa_help_collection",
         embedding_function=embeddings,

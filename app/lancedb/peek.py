@@ -87,9 +87,9 @@ def main():
 
     _hr(f"向量检索冒烟测试：query='{probe}'")
     try:
-        from langchain_community.embeddings import ZhipuAIEmbeddings
+        from common.zhipu_embed import ZhipuEmbeddings
 
-        qv = ZhipuAIEmbeddings(model="embedding-3").embed_query(probe)
+        qv = ZhipuEmbeddings(model="embedding-3").embed_query(probe)
         results = (
             tbl.search(qv, vector_column_name="vector")
             .select(["text", "source"])

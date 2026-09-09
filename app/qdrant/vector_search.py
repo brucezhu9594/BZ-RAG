@@ -1,10 +1,11 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -17,7 +18,7 @@ def _get_vector_store() -> QdrantVectorStore:
     return QdrantVectorStore(
         client=client,
         collection_name=COLLECTION_NAME,
-        embedding=ZhipuAIEmbeddings(model="embedding-3"),
+        embedding=ZhipuEmbeddings(model="embedding-3"),
         retrieval_mode=RetrievalMode.DENSE,
     )
 

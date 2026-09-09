@@ -10,7 +10,6 @@
 import os
 
 import mlflow
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from mlflow.entities import Document as MlflowDocument
@@ -18,6 +17,7 @@ from mlflow.entities import SpanType
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
 from api.history_utils import build_chat_messages, build_rewrite_prompt
+from common.zhipu_embed import ZhipuEmbeddings
 
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "hewa_help_collection"
@@ -48,7 +48,7 @@ def _rewrite_query_span(query: str, history: list[tuple[str, str]]) -> str:
 
 @mlflow.trace(span_type=SpanType.RETRIEVER)
 def _retrieve_span(query: str) -> list[Document]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     client = MilvusClient(uri=MILVUS_URI)
     query_vector = embeddings.embed_query(query)
 

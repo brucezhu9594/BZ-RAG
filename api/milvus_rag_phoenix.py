@@ -21,13 +21,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_openai import ChatOpenAI
 from phoenix.otel import register
 from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker
 
 from api.history_utils import build_chat_messages, build_rewrite_prompt
+from common.zhipu_embed import ZhipuEmbeddings
 
 MILVUS_URI = "http://localhost:19530"
 COLLECTION_NAME = "hewa_help_collection"
@@ -65,7 +65,7 @@ def _retrieve(query: str) -> list[Document]:
         "retrieve", openinference_span_kind="retriever"
     ) as span:
         span.set_input(query)
-        embeddings = ZhipuAIEmbeddings(model="embedding-3")
+        embeddings = ZhipuEmbeddings(model="embedding-3")
         client = MilvusClient(uri=MILVUS_URI)
         query_vector = embeddings.embed_query(query)
 

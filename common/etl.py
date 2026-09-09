@@ -18,9 +18,10 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 from dotenv import load_dotenv
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 
@@ -120,7 +121,7 @@ def split_docs(docs: list[Document]) -> list[Document]:
 
 def embed_chunks(chunks: list[Document]) -> list[list[float]]:
     """分批调用 ZhipuAI embedding（单次上限 64）。"""
-    embeddings = ZhipuAIEmbeddings(model=EMBED_MODEL)
+    embeddings = ZhipuEmbeddings(model=EMBED_MODEL)
     texts = [c.page_content for c in chunks]
     vectors: list[list[float]] = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):

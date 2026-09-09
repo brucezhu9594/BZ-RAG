@@ -1,12 +1,12 @@
 import os
 
 from dotenv import load_dotenv
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
 from qdrant_client import QdrantClient, models
 
 from app.qdrant.bm25 import query_sparse_vector
 from common.keyword_expansion import expand_keywords
+from common.zhipu_embed import ZhipuEmbeddings
 
 load_dotenv()
 MODEL = os.environ["MODEL_ID"]
@@ -19,7 +19,7 @@ FINAL_TOP_K = 2
 
 
 def _retrieve(query: str) -> tuple[str, list]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     client = QdrantClient(host="localhost", port=6333)
 
     # 关键词补充（增强 BM25 路召回）

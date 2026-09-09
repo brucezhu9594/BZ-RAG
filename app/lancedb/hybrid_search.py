@@ -12,8 +12,9 @@ import jieba
 import lancedb
 from dotenv import load_dotenv
 from lancedb.rerankers import RRFReranker
-from langchain_community.embeddings import ZhipuAIEmbeddings
 from langchain_openai import ChatOpenAI
+
+from common.zhipu_embed import ZhipuEmbeddings
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 from common.keyword_expansion import expand_keywords  # noqa: E402
@@ -32,7 +33,7 @@ def _tokenize_for_fts(text: str) -> str:
 
 
 def _retrieve(query: str) -> tuple[str, list]:
-    embeddings = ZhipuAIEmbeddings(model="embedding-3")
+    embeddings = ZhipuEmbeddings(model="embedding-3")
     db = lancedb.connect(DB_PATH)
     tbl = db.open_table(COLLECTION_NAME)
 
