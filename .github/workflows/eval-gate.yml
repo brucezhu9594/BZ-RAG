@@ -11,6 +11,15 @@ permissions:
 
 jobs:
   eval:
+    # 安全守卫：本仓库是 **public**，而本 job 跑在 self-hosted runner（作者的工作机）上。
+    # 这是 GitHub 明确警告的组合——任何人 fork 之后提 PR，其 workflow 就会在这台机器上
+    # 执行代码，而公开仓库能用的只有"首次贡献者需审批"这一层弱防护（老贡献者不受限，
+    # 且 Settings > Actions 里 private 仓库才有的 access policy 对 public 仓库返回 422）。
+    # 这里把 pull_request 事件限制为「PR 源分支在本仓库内」，fork 来的 PR 直接跳过本 job。
+    # push 事件不加限制：能推 master 的本来就得有写权限。
+    if: >-
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     # 真管线依赖本机 Milvus(19530) 与本机 Phoenix(6006)，云 runner 碰不到，
     # 所以必须钉在装了这两个服务的机器上（标签 bz-rag-local）。
     runs-on: [self-hosted, bz-rag-local]
