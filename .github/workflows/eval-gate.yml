@@ -103,6 +103,14 @@ jobs:
       # 直接点名缺哪个。否则症状是 pytest 收集阶段抛「判官配置缺失」（只覆盖
       # JUDGE_* 三个），而 MODEL_ID / ZHIPUAI_API_KEY 缺失还要更晚、在第一次真调
       # 管线时才炸，报错离真因更远。
+      # ⚠️ 本文件里所有 `run:` 块的内容必须是**纯 ASCII**（说明写在 YAML 注释里，
+      # 注释不会进入生成的脚本文件）。原因：GitHub 把 run 块写成 **UTF-8 无 BOM**
+      # 的 .ps1，而 powershell.exe 5.1 在活动代码页 936 下按 GBK 解码它，中文的
+      # UTF-8 字节里存在**非法 GBK 序列**（实测 `illegal multibyte sequence`），
+      # 解码器会丢弃/替换字节，把字符串的结束引号一起吃掉，报出与真因毫无关系的
+      # `Missing closing '}' in statement block`。已在本机用
+      # [Parser]::ParseFile 逐行二分定位确认：把含中文的那行改成 ASCII 即通过。
+      #
       # 有意**不写** `shell:`，跟本 job 其它步骤一样走 Windows 默认 shell。
       # 这一步最初写成 `shell: bash`，在 CI 上直接失败：
       #   <3>WSL (...) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed
@@ -123,15 +131,14 @@ jobs:
             if ([string]::IsNullOrWhiteSpace($val)) { $missing += $v }
           }
           if ($missing.Count -gt 0) {
-            Write-Host "::error::缺少以下 Repository secret：$($missing -join ', ')"
-            Write-Host "在仓库 Settings > Secrets and variables > Actions > Secrets 里补齐。"
-            Write-Host "注意作用域：必须是 Repository secrets。放进某个 Environment 的"
-            Write-Host "secret 只有当 job 声明了 environment: <名字> 时才可见，本 job 没有声明。"
+            Write-Host "::error::Missing repository secrets: $($missing -join ', ')"
+            Write-Host "Add them under Settings > Secrets and variables > Actions > Secrets."
+            Write-Host "Scope matters: they must be *repository* secrets. A secret stored in an"
+            Write-Host "Environment is only visible when the job declares environment: NAME,"
+            Write-Host "and this job does not."
             exit 1
           }
-          # 不回显具体值：七个都是 secret，GitHub 会把值掩成 ***，打印出来没信息量。
-          # 判官模型名要查的话看 Phoenix experiment 的 metadata.judge。
-          Write-Host "七个凭证均已注入。"
+          Write-Host "All 7 credentials injected."
 
       # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
       # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
@@ -165,7 +172,7 @@ jobs:
           $code = & curl.exe -s -o NUL -w "%{http_code}" --max-time 10 http://localhost:6006/readyz
           Write-Host "phoenix /readyz -> $code"
           if ($code -ne "200") {
-            Write-Host "::error::Phoenix 未就绪（/readyz 返回 $code）。这台 runner 上要先起 Phoenix："
+            Write-Host "::error::Phoenix is not ready (/readyz returned $code). Start it on this runner:"
             Write-Host "  powershell -File scripts/phoenix-up.ps1"
             exit 1
           }
