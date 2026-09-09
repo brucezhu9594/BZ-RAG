@@ -1,3 +1,10 @@
+## [1.4.2](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.1...v1.4.2) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ci:** eval-gate 的 env 去掉 no_proxy，GitHub 判它与 NO_PROXY 重复定义 ([0962932](https://github.com/brucezhu9594/BZ-RAG/commit/0962932474c6e0944759e6005c098acbc039986c)), closes [.github/workflows/eval-gate.yml#L1](https://github.com/.github/workflows/eval-gate.yml/issues/L1)
+
 ## [1.4.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.0...v1.4.1) (2026-09-09)
 
 
