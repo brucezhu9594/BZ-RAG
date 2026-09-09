@@ -32,8 +32,15 @@ jobs:
     # （24s/case × 48 + 依赖安装）留出余量，提到 45 分钟。
     timeout-minutes: 45
     env:
+      # 只写大写这一个。GitHub Actions 的 env 键名**大小写不敏感**，同时写
+      # NO_PROXY 和 no_proxy 会被判成重复定义，整个 workflow 文件被拒：
+      #   Invalid workflow file: (Line: 36, Col: 7): 'no_proxy' is already defined
+      # 这个错误只在 GitHub 侧出现——本地 PyYAML / ruamel 都能正常解析（它们按
+      # 字符逐一比对键名，两者不同），所以直到门禁第一次真在 CI 上跑才暴露，
+      # 表现是「启动期失败、0 个 job、workflow 名回退成文件路径」。
+      # 不影响功能：Windows 的环境变量本身大小写不敏感，NO_PROXY 一个就覆盖了。
+      # （Python 侧 os.environ.setdefault 那两行是给 Linux 准备的，与此无关。）
       NO_PROXY: localhost,127.0.0.1
-      no_proxy: localhost,127.0.0.1
       PHOENIX_ENDPOINT: http://localhost:6006
       PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
       PHOENIX_PROJECT_NAME: bz-rag-ci
