@@ -1,3 +1,10 @@
+## [1.4.4](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.3...v1.4.4) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ci:** eval-gate 的 run 块改为纯 ASCII，powershell 5.1 会按 GBK 误读 UTF-8 脚本 ([34840d7](https://github.com/brucezhu9594/BZ-RAG/commit/34840d75a92e11e0b2ec3c2d8d0c376926277514))
+
 ## [1.4.3](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.2...v1.4.3) (2026-09-09)
 
 
