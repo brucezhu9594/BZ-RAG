@@ -177,12 +177,30 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $venv "Scripts") -Encoding utf8
           & (Join-Path $venv "Scripts\python.exe") -c "import sys; print(sys.executable)"
 
+      # ⚠️ PowerShell 的 `run:` 多命令块**只有最后一条命令的退出码算数**
+      # （GitHub 在脚本末尾追加 `exit $LASTEXITCODE`），中间命令失败会被静默吞掉。
+      # 实测踩过：`pip install -r requirements.txt` 因网络中断失败
+      # （ConnectionResetError 10054 拉 pydantic_settings 时，pip 五次重试全断），
+      # 紧随其后的 `pip install -r requirements-eval.txt` 成功，于是**整步报了
+      # success**，langchain 全套根本没装上，直到门禁那步才以
+      # `ModuleNotFoundError: No module named 'langchain_core'` 暴露——报错位置
+      # 离真因隔了两个步骤。所以每条 pip 之后都显式检查 $LASTEXITCODE。
+      #
+      # --retries / --timeout 放宽：这台机器的出网链路会掐连接，pip 默认 5 次
+      # 重试不够。venv 与 pip 的 wheel 缓存都跨 run 保留，所以重跑时待下载量
+      # 大幅减少，放宽重试足以收敛。
       - name: Install dependencies
         run: |
           python -c "import sys; print('installing into: ' + sys.executable)"
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          python -m pip install -r requirements-eval.txt
+          $pipArgs = @('--retries', '10', '--timeout', '120')
+          python -m pip install @pipArgs --upgrade pip
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip self-upgrade failed"; exit $LASTEXITCODE }
+          python -m pip install @pipArgs -r requirements.txt
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install -r requirements.txt failed"; exit $LASTEXITCODE }
+          python -m pip install @pipArgs -r requirements-eval.txt
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install -r requirements-eval.txt failed"; exit $LASTEXITCODE }
+          python -c "import langchain_core, pymilvus, zai, phoenix.otel; print('import smoke OK')"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::post-install import smoke failed"; exit $LASTEXITCODE }
 
       # phoenix.otel.register() 不做连通性检查：Phoenix 宕机时它依然返回成功，
       # trace 却零产出，所以这一步不能省。打 /readyz 而不是根路径：根路径乃至
