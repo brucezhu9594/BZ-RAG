@@ -54,19 +54,24 @@ jobs:
       # 「RuntimeError: 判官配置缺失：JUDGE_OPENAI_API_KEY, ...」——门禁会在 pytest
       # 收集阶段就红，报错原因与被测质量毫无关系。
       #
-      # 需要在仓库 Settings > Secrets and variables > Actions 里配好：
-      #   Secrets   : OPENAI_API_KEY / ZHIPUAI_API_KEY / JUDGE_OPENAI_API_KEY
-      #   Variables : OPENAI_BASE_URL / MODEL_ID / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID
-      # 端点与模型名放 Variables 而不是 Secrets，是为了让它们在日志里可见——
-      # 判官供应商漂移是本项目已知的可比性风险（见 docs 设计文档 §8），把模型名
-      # 掩成 *** 会让排查这类问题变难。
+      # 七个都走 Repository secrets（Settings > Secrets and variables > Actions）：
+      #   OPENAI_API_KEY / OPENAI_BASE_URL / MODEL_ID
+      #   ZHIPUAI_API_KEY
+      #   JUDGE_OPENAI_API_KEY / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID
+      #
+      # 端点与模型名本身并不敏感，按理更适合放 Variables 让它们在日志里可见——
+      # 判官供应商漂移是本项目已知的可比性风险（见设计文档 §8），模型名被掩成
+      # *** 会让排查变难。这里仍统一走 Secrets，是因为它们已经配在 Secrets 里了，
+      # 迁就现状比返工划算；可见性的损失有替代来源：test_rag_eval.py 的
+      # experiment_metadata 会把 JUDGE_MODEL_ID 写进 Phoenix 的 experiment，
+      # 在 Phoenix UI 上查得到，不依赖 CI 日志。
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       ZHIPUAI_API_KEY: ${{ secrets.ZHIPUAI_API_KEY }}
       JUDGE_OPENAI_API_KEY: ${{ secrets.JUDGE_OPENAI_API_KEY }}
-      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
-      MODEL_ID: ${{ vars.MODEL_ID }}
-      JUDGE_OPENAI_BASE_URL: ${{ vars.JUDGE_OPENAI_BASE_URL }}
-      JUDGE_MODEL_ID: ${{ vars.JUDGE_MODEL_ID }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      MODEL_ID: ${{ secrets.MODEL_ID }}
+      JUDGE_OPENAI_BASE_URL: ${{ secrets.JUDGE_OPENAI_BASE_URL }}
+      JUDGE_MODEL_ID: ${{ secrets.JUDGE_MODEL_ID }}
 
     steps:
       - name: Checkout
@@ -85,13 +90,15 @@ jobs:
             [ -n "${!v}" ] || missing+=("$v")
           done
           if [ ${#missing[@]} -ne 0 ]; then
-            echo "::error::缺少以下配置：${missing[*]}"
-            echo "在仓库 Settings > Secrets and variables > Actions 里补齐："
-            echo "  Secrets  : OPENAI_API_KEY / ZHIPUAI_API_KEY / JUDGE_OPENAI_API_KEY"
-            echo "  Variables: OPENAI_BASE_URL / MODEL_ID / JUDGE_OPENAI_BASE_URL / JUDGE_MODEL_ID"
+            echo "::error::缺少以下 Repository secret：${missing[*]}"
+            echo "在仓库 Settings > Secrets and variables > Actions > Secrets 里补齐。"
+            echo "注意作用域：必须是 Repository secrets。放进某个 Environment 的"
+            echo "secret 只有当 job 声明了 environment: <名字> 时才可见，本 job 没有声明。"
             exit 1
           fi
-          echo "凭证齐全（judge=${JUDGE_MODEL_ID}, model=${MODEL_ID}）"
+          # 不回显具体值：七个都是 secret，GitHub 会把值掩成 ***，打印出来没信息量。
+          # 判官模型名要查的话看 Phoenix experiment 的 metadata.judge。
+          echo "七个凭证均已注入。"
 
       # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
       # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
