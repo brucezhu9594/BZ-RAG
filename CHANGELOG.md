@@ -1,3 +1,10 @@
+## [1.4.3](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.2...v1.4.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ci:** eval-gate 适配 Windows 默认 shell（powershell 5.1），超时提到 80 分钟 ([b2475d7](https://github.com/brucezhu9594/BZ-RAG/commit/b2475d72bf78d48f5d085530a27f09cb6f84edf8))
+
 ## [1.4.2](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.1...v1.4.2) (2026-09-09)
 
 
