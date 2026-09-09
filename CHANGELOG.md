@@ -1,3 +1,10 @@
+## [1.4.6](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.5...v1.4.6) (2026-09-09)
+
+
+### Bug Fixes
+
+* **ci:** pip 每步显式检查退出码，放宽重试；补装后 import 冒烟 ([6fffa5c](https://github.com/brucezhu9594/BZ-RAG/commit/6fffa5c93ddebe4026b16246097f8c7356feb670))
+
 ## [1.4.5](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.4...v1.4.5) (2026-09-09)
 
 
