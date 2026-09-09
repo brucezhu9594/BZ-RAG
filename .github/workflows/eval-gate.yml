@@ -30,7 +30,13 @@ jobs:
     # acceptance 判定（conftest.py 的 pytest_sessionfinish 根本没机会跑），只剩
     # 一个无信息量的红，比一次真实的 acceptance 失败更难排查。按实测吞吐量
     # （24s/case × 48 + 依赖安装）留出余量，提到 45 分钟。
-    timeout-minutes: 45
+    # 2026-09-09 从 45 提到 80：上面那个 24s/case 的估算偏乐观了。本机实测
+    # 24 条 1 轮跑了 1548 秒 = 64.5s/case（BM25 修复后混合检索真正生效，
+    # 稀疏那一路不再空转，检索耗时本来就上去了）。push 事件 EVAL_REPETITIONS=2
+    # 即 48 项，按实测推算约 52 分钟，45 分钟必被 timeout 杀掉——而 job 被
+    # timeout 中途杀死不会留下记分卡（conftest.py 的 pytest_sessionfinish 没机会
+    # 跑），只剩一个无信息量的红，比一次真实的 acceptance 失败更难排查。
+    timeout-minutes: 80
     env:
       # 只写大写这一个。GitHub Actions 的 env 键名**大小写不敏感**，同时写
       # NO_PROXY 和 no_proxy 会被判成重复定义，整个 workflow 文件被拒：
@@ -97,24 +103,35 @@ jobs:
       # 直接点名缺哪个。否则症状是 pytest 收集阶段抛「判官配置缺失」（只覆盖
       # JUDGE_* 三个），而 MODEL_ID / ZHIPUAI_API_KEY 缺失还要更晚、在第一次真调
       # 管线时才炸，报错离真因更远。
+      # 有意**不写** `shell:`，跟本 job 其它步骤一样走 Windows 默认 shell。
+      # 这一步最初写成 `shell: bash`，在 CI 上直接失败：
+      #   <3>WSL (...) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed
+      # GitHub 在 Windows 上解析 `shell: bash` 时按 PATH 找 bash，而这台机器
+      # PATH 里第一个是 C:\Windows\system32\bash.exe——WSL 的启动器，且 WSL 里
+      # 没装发行版，所以 /bin/bash 不存在。这台 runner 也没装 pwsh，
+      # GitHub 的默认 shell 是 powershell.exe 5.1，故下面按 5.1 语法写
+      # （不用三元运算符、不用 ??，它们在 5.1 里不存在）。
       - name: Preflight - 校验凭证已注入
-        shell: bash
         run: |
-          missing=()
-          for v in OPENAI_API_KEY ZHIPUAI_API_KEY JUDGE_OPENAI_API_KEY \
-                   OPENAI_BASE_URL MODEL_ID JUDGE_OPENAI_BASE_URL JUDGE_MODEL_ID; do
-            [ -n "${!v}" ] || missing+=("$v")
-          done
-          if [ ${#missing[@]} -ne 0 ]; then
-            echo "::error::缺少以下 Repository secret：${missing[*]}"
-            echo "在仓库 Settings > Secrets and variables > Actions > Secrets 里补齐。"
-            echo "注意作用域：必须是 Repository secrets。放进某个 Environment 的"
-            echo "secret 只有当 job 声明了 environment: <名字> 时才可见，本 job 没有声明。"
+          $required = @(
+            'OPENAI_API_KEY', 'ZHIPUAI_API_KEY', 'JUDGE_OPENAI_API_KEY',
+            'OPENAI_BASE_URL', 'MODEL_ID', 'JUDGE_OPENAI_BASE_URL', 'JUDGE_MODEL_ID'
+          )
+          $missing = @()
+          foreach ($v in $required) {
+            $val = [Environment]::GetEnvironmentVariable($v)
+            if ([string]::IsNullOrWhiteSpace($val)) { $missing += $v }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::缺少以下 Repository secret：$($missing -join ', ')"
+            Write-Host "在仓库 Settings > Secrets and variables > Actions > Secrets 里补齐。"
+            Write-Host "注意作用域：必须是 Repository secrets。放进某个 Environment 的"
+            Write-Host "secret 只有当 job 声明了 environment: <名字> 时才可见，本 job 没有声明。"
             exit 1
-          fi
+          }
           # 不回显具体值：七个都是 secret，GitHub 会把值掩成 ***，打印出来没信息量。
           # 判官模型名要查的话看 Phoenix experiment 的 metadata.judge。
-          echo "七个凭证均已注入。"
+          Write-Host "七个凭证均已注入。"
 
       # runner 本机装的是 Python 3.14.3（C:\Python314），不用 actions/setup-python：
       # 那会去装另一个版本，且 self-hosted runner 未必有权限/网络联网装 Python。
@@ -139,9 +156,19 @@ jobs:
       # 上有 HTTP server"；/readyz 是 Phoenix 自己暴露的就绪探针（服务端内部真的
       # 执行一次 select 1 探数据库连通性），能覆盖"进程活着但连不上库、记不了
       # trace"这个真实失败模式。带超时，避免 Phoenix 没起来时卡死 job。
+      # 必须写 curl.exe 而不是 curl：这台 runner 的默认 shell 是 powershell.exe 5.1，
+      # 里面 `curl` 是 **Invoke-WebRequest 的别名**（PowerShell 6+ 才移除了这个别名），
+      # 会把下面这串 Unix 风格参数当成 Invoke-WebRequest 的参数解析而失败。
+      # 输出目标同理用 NUL 而不是 /dev/null。
       - name: Check Phoenix is up
         run: |
-          curl -s -o /dev/null -w "phoenix=%{http_code}\n" --max-time 10 --fail http://localhost:6006/readyz
+          $code = & curl.exe -s -o NUL -w "%{http_code}" --max-time 10 http://localhost:6006/readyz
+          Write-Host "phoenix /readyz -> $code"
+          if ($code -ne "200") {
+            Write-Host "::error::Phoenix 未就绪（/readyz 返回 $code）。这台 runner 上要先起 Phoenix："
+            Write-Host "  powershell -File scripts/phoenix-up.ps1"
+            exit 1
+          }
 
       # --import-mode=importlib 是必需的：evaluation/phoenix/ 这个目录名和已安装的
       # phoenix 包在 pytest 默认 prepend 模式下冲突，会在 conftest 加载阶段就
