@@ -474,18 +474,65 @@ refusal_check         pass_rate        1.000     1.000    24  PASS
 收尾动作：
 
 1. ✅ 已删掉 `.github/workflows/eval-gate.yml` 里两个 `Run eval gate` 步骤的 `continue-on-error: true`；
-2. ⬜ 把下面「注册完之后：验证门禁真的会拦不达标的改动」这节的自验步骤重新走一遍，确认它仍然可复现。
-   **注意这一步至今没做过**——self-hosted runner 从未注册（本机既无 `actions.runner.*` 服务、
-   也无 `C:\actions-runner` 目录），所以自 `8ae5874` 接入门禁以来，它**在 CI 上一次都没真跑过**，
-   所有"实测"都是本地手工跑的。runner 注册步骤见下面「注册步骤」小节。
+2. ✅ 已在真 PR 上走通（2026-09-10，PR #3，已关闭不合并）。
 
-**两个需要盯着的残余风险**：
+##### 2026-09-10：期 1 验收标准已在真 PR 上达成
 
+设计文档 §7 的期 1 完成标志：「改坏一个 prompt 推 PR，`eval-gate` 变红且 PR check 里
+能看到是哪条 criterion 没过、实测值多少；改回来变绿。」实测三步：
+
+| 步骤 | `faithfulness average` | `eval` check |
+|---|---|---|
+| ① 温和退化：拆掉「仅依据检索结果回答、不要编造」的接地约束 | 1.000 → **0.833** | **pass**（没红） |
+| ② 加重退化：要求「完全忽略检索结果、仅凭常识回答」 | **0.500** | **fail** |
+| ③ 改回原 prompt | **1.000** | **pass** |
+
+②的记分卡精确定位到了退化维度，其余四条 criteria 仍 PASS——不是一片红：
+
+```
+faithfulness          average          0.500     0.800     3  FAIL
+                      └─ mean 0.500 < 0.8
+faithfulness          pass_rate        1.000     0.900     3  PASS
+answer_relevancy      average          0.833     0.800     3  PASS
+contextual_recall     pass_rate        1.000     1.000     3  PASS
+refusal_check         pass_rate        1.000     1.000     3  PASS
+```
+
+**①暴露的真缺陷：PR 上的 smoke 子集灵敏度不够。** smoke 只有 3 条 case
+（`evaluation/phoenix/cases.py` 的 `SMOKE_SIZE = 3`），所以 `faithfulness average`
+只能落在 `{0, .167, .333, .5, .667, .833, 1.0}` 这 7 个离散档位上，相邻档差 **0.167**。
+阈值 0.8 卡在 0.833 与 0.667 之间，意味着**单条 case 从 correct 掉成 partial 在 PR 上完全不可见**，
+必须两条同时退化才够越线。这与更早那次「smoke 三条全绿、全量 24 条却有两条 FAIL」
+是同一枚硬币的两面：3 条样本对任何均值型/比例型判据都太粗。
+
+候选处理方向（未决）：
+
+| 方向 | 代价 |
+|---|---|
+| `SMOKE_SIZE` 从 3 提到 8-10 | PR 门禁从 ~5 分钟涨到 ~10-12 分钟，判官调用量翻 3 倍；会改变 smoke 构成 |
+| PR 也跑全量 24 条 | ~26 分钟/PR，太重 |
+| smoke 只当冒烟用，质量判定只在 master 全量做 | PR 不再拦质量退化，退回"合并后才发现" |
+| 给 `faithfulness` 加一条 `pass_rate` 判据 | 更灵敏，但更容易被判官抖动误伤 |
+
+**三个需要盯着的残余风险**：
+
+- **PR smoke 的离散度问题**（见上表）——目前 PR 只能拦住"两条以上同时退化"的改动。
 - `contextual_recall` 的 `min_pass_rate` 是 1.0，而观测值恰好也是 1.000——**余量为零**，
   金标集一扩就容易被单条 case 打红。目前没有实测证据支持改它，记在这里备查。
-- 判官调用会零星失败（本次全量 24 条里出现 2 次 errored）。`max_error_rate` 的
+- 判官调用会零星失败（全量 24 条里出现过 2 次 errored）。`max_error_rate` 的
   "绝对容忍 1 次 + 超出后按 0.2 比例"闸门目前接得住，但判官供应商漂移若加剧，
   这会成为门禁 flake 的主要来源。
+
+##### runner 必须装成 Windows 服务，否则活不过一个终端会话
+
+注册时如果**没带** `--runasservice`，runner 只能用 `run.cmd` 以前台进程方式跑，
+终端一关就掉线。实测代价：master 全量跑到一半 runner 掉线，job 的
+`Run eval gate` 步骤 conclusion 变成 `null`（既不是 success 也不是 failure），
+整个 run 记为 failure——这个症状很容易被误读成门禁本身有问题。
+
+另外 `svc.cmd` **是 `config.cmd --runasservice` 生成的**，没带这个参数时
+runner 目录下根本不存在这个文件，所以"事后再装服务"必须重新注册一次。命令见下面
+「注册步骤」小节的服务安装变体。
 
 ##### Bug 3（已修）：BM25 中文分词未配置，混合检索曾退化成纯 dense
 
@@ -587,6 +634,76 @@ install"一模一样**，容易把排障方向带偏（原理见 4.4 对应条�
 4. 打开 `https://github.com/brucezhu9594/BZ-RAG/settings/actions/runners`，确认能看到
    一个标签为 `bz-rag-local` 的 runner，状态显示 **Idle**（不是 Offline）——这才算
    注册成功。
+
+#### 推荐写法：用 `gh` 现取 token，避免停在交互提示上过期
+
+上面第 1、2 步分两次操作，中间只要在提示符上停留一会儿，注册 token 就会失效。
+实测连续踩过两次：
+
+- 第一次：token 过期 → `POST /actions/runner-registration` 返回 **404**
+  （这个端点在 token 无效时返回 404 而不是 401，避免泄露资源是否存在，很有迷惑性）
+- 第二次：`√ Connected to GitHub` 之后卡在"组名 / runner 名 / 标签"三个交互提示上，
+  等回来敲 Enter 时认证已过期 →
+  `The user 'System:PublicAccess;aaaaaaaa-...' is not authorized`
+  （全 `a` 的 GUID 是 Actions 服务里的**匿名身份**，意思是请求已经没有认证了）
+
+可靠写法是让 token **从生成到使用不超过一秒**，并用参数把所有交互答案给全。
+前提是 `gh` 已登录（`gh auth login --hostname github.com --git-protocol https --web`）。
+在**管理员** PowerShell 里，`C:\actions-runner` 下：
+
+```powershell
+$t = gh api -X POST repos/brucezhu9594/BZ-RAG/actions/runners/registration-token --jq .token
+.\config.cmd --replace --url https://github.com/brucezhu9594/BZ-RAG --token $t `
+  --name CI-IT03-000911 --labels bz-rag-local --work _work `
+  --runasservice --windowslogonaccount "CAREERINTLINC\ci24871"
+```
+
+**有意不加 `--unattended`**：不加的话它只会交互式问一个问题（Windows 账户密码），
+不回显、不进 `Get-History`；加了 `--unattended` 就必须用 `--windowslogonpassword`
+把密码明文写进命令行。只剩一个提示，不会再有过期风险。
+
+**runner 2.337.0 不再生成 `svc.cmd`**（旧版本文档里那套 `.\svc.cmd install/start`
+在这个版本上会报 `CommandNotFoundException`）。`config.cmd --runasservice` 自己就把
+服务装好、设成延迟自启、并直接启动，输出里能看到：
+
+```
+Service actions.runner.<owner>-<repo>.<name> successfully installed
+Service ... successfully set to delayed auto start
+Waiting for service to start...
+Service ... started successfully
+```
+
+所以装完只需核实，不用再手动 start：
+
+```powershell
+Get-CimInstance Win32_Service -Filter "Name LIKE 'actions.runner%'" | Select-Object Name, StartName, State
+Get-Service actions.runner.* | Select-Object Name, Status, StartType
+```
+
+实测应为 `State = Running`、`StartName = CAREERINTLINC\ci24871`、`StartType = Automatic`。
+若 `StartName` 显示 `LocalSystem`，说明 `--windowslogonaccount` 没生效——依赖装在
+`ci24871` 的 per-user site-packages 里，账户不对门禁第一次真跑就会 `ModuleNotFoundError`，
+按下一节注销重来。
+
+**另一个实测坑：`--replace` 救不了"本地已配置"。** 如果 runner 目录下已有
+`.runner` / `.credentials`（比如之前不带 `--runasservice` 注册过），再跑 `config.cmd`
+会直接拒绝：
+
+```
+Cannot configure the runner because it is already configured.
+To reconfigure the runner, run 'config.cmd remove' first.
+```
+
+`--replace` 只替换**远端**的同名 runner，不管本地状态。必须先注销——注意注销用的是
+**remove-token**，和注册用的 registration-token 是两个不同的端点：
+
+```powershell
+$rt = gh api -X POST repos/brucezhu9594/BZ-RAG/actions/runners/remove-token --jq .token
+.\config.cmd remove --token $rt
+```
+
+（只有当 runner **已经装成服务**时才需要先停服务再 remove；用 `run.cmd` 前台跑的
+直接 remove 即可。）
 
 #### 需要重做时：先卸载服务，别直接 `config.cmd remove`
 
