@@ -197,7 +197,10 @@ Expected: FAIL，`ModuleNotFoundError: No module named 'evaluation.phoenix.onlin
   evaluators: [faithfulness, answer_relevancy]
   sampling_rate: 0.2          # 唯一的成本旋钮
   cadence: continuous         # continuous | historical
-  window_minutes: 30
+  # 窗口开到触发间隔的 2 倍。去重能防重复评，但**防不住间隙**——调度一延迟，
+  # 就有一段 span 永远落在任何窗口之外、再也不会被评。重叠部分全被去重挡掉，
+  # 不产生额外判官调用，纯赚。
+  window_minutes: 60
 
 - name: canary-guardrail
   project: bz-rag-canary
@@ -207,7 +210,7 @@ Expected: FAIL，`ModuleNotFoundError: No module named 'evaluation.phoenix.onlin
   # 这是从 Arize 抄来的口径，不是随手写的 1.0。
   sampling_rate: 1.0
   cadence: continuous
-  window_minutes: 30
+  window_minutes: 60
 ```
 
 - [ ] **Step 4: 写实现**
@@ -662,7 +665,18 @@ git commit -m "feat(eval): 按 span_id 的确定性抽样，护栏型 rate=1.0 �
 **Interfaces:**
 - Consumes: `online_tasks.load_tasks` / `OnlineTask`、`span_extract.extract_eval_input`、`sampling.should_sample`、`evaluators` 里的 `faithfulness` / `answer_relevancy` / `refusal_check`
 - Produces:
-  - `run_task(client, task, now=None) -> RoundStats`
+  - `run_task(client, task, now=None, judges=None) -> RoundStats`
+  - `default_judges() -> dict[str, Callable]`
+
+> **执行期发现的偏差（2026-09-10）**：判官必须**延迟导入 + 可注入**，不能像原计划那样
+> 在模块顶层 `from evaluation.phoenix.evaluators import ...`。`evaluators.py` 在 import
+> 期就要求 `JUDGE_OPENAI_API_KEY` 等三个变量（期 1 的有意设计），而 `tests/` 会跑在
+> `test.yml` 的 ubuntu-latest 上——那里没有 `.env` 也没有 secrets。实测：对本仓库做干净
+> clone 后 `import evaluation.phoenix.evaluators` 抛 `RuntimeError: 判官配置缺失`；
+> 现有 `tests/` 能在该环境下跑过 87 条，正是因为没有任何测试 import 过它。
+> 若按原计划在顶层 import，新测试会把一直绿着的 Test workflow 弄红。
+> 故：`run_task` 增加 `judges` 参数（测试注入 stub），默认 `None` 时才调
+> `default_judges()` 延迟导入真判官。
   - `class RoundStats(NamedTuple)`：`task: str`、`pulled: int`、`skipped: int`、`deduped: int`、`sampled: int`、`annotated: int`、`errored: int`
   - `main(argv=None) -> int` —— CLI 入口，退出码 0=成功，1=有任务抛异常
 
@@ -1385,12 +1399,13 @@ Expected: 两行统计，`canary-guardrail` 的 `sampled` 等于根 span 数（r
 ```yaml
 name: Canary Watch
 
+# 期 2 只留手动触发，**有意不加 cron**。影子 canary 是 up.ps1 起的三个前台进程，
+# 关机或关终端就没了，大部分时间不在跑；挂上 */30 的 cron 等于每天 48 个
+# 拉到 0 条 span 就结束的空转 job。而且 GitHub 对连续 60 天无活动的仓库会自动
+# 停掉 scheduled workflow，那种"以为在跑其实早停了"的状态比没有更糟。
+# 等影子 canary 也做成服务、或者 Milvus 真上云之后，再把 cron 加回来。
+# 加回来时记得让 window_minutes 保持在触发间隔的 2 倍以上。
 on:
-  schedule:
-    # 每 30 分钟一轮，与 online_tasks.yaml 的 window_minutes: 30 对齐。
-    # cron 漏跑不影响正确性：worker 是幂等的（去重靠 span 上已有的同名 annotation），
-    # 下一轮会把上一轮漏掉的窗口一并覆盖。
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
