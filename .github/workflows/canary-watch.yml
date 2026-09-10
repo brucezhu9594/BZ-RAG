@@ -13,6 +13,15 @@ on:
 permissions:
   contents: read
 
+# 与 eval-gate 相反，这里**不取消**、只串行排队（cancel-in-progress: false）。
+# 两轮 worker 同时跑会撞上去重的竞态：两个进程各自拉到同一批 span，
+# 都查到"还没有同名 annotation"，于是都去调判官——重复计费，且 Phoenix 上
+# 会留下两条同名 annotation。去重是"查完再写"的读改写，本身不是原子的，
+# 唯一可靠的防护就是不让两轮重叠。
+concurrency:
+  group: canary-watch
+  cancel-in-progress: false
+
 jobs:
   watch:
     # 与 eval-gate.yml 同一台机器：worker 要访问 localhost:6006 的 Phoenix。

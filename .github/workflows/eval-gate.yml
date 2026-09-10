@@ -9,6 +9,17 @@ on:
 permissions:
   contents: read
 
+# 同一 ref 上只保留最新一次门禁，旧的排队/在跑的直接取消。
+# 起因：单个 self-hosted runner 串行执行，一次全量约 30 分钟。连推两个提交时
+# 实测会出现「前一个提交的全量还在跑、后一个已经排在后面」——前者的结果已经
+# 被后者取代，白占半小时机器时间，还把 canary-watch 之类的 job 堵在队列里。
+# group 里带 github.ref：PR 与 master 互不取消，不同 PR 之间也互不取消。
+# 中途取消会在 Phoenix 上留下一个跑了一半的 experiment（落在分支名的 dataset 里），
+# 无害——那个 dataset 本来就是按分支隔离的临时产物。
+concurrency:
+  group: eval-gate-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   eval:
     # 安全守卫：本仓库是 **public**，而本 job 跑在 self-hosted runner（作者的工作机）上。
