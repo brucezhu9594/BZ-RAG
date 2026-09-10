@@ -523,6 +523,83 @@ refusal_check         pass_rate        1.000     1.000     3  PASS
   "绝对容忍 1 次 + 超出后按 0.2 比例"闸门目前接得住，但判官供应商漂移若加剧，
   这会成为门禁 flake 的主要来源。
 
+#### 期 2（2026-09-10 完成）：线上评估——判官分数写回 span
+
+期 1 的判官挂在 experiment / example 层（一条 case 一组分数）；期 2 把同一批判官
+用到**线上 span** 上，分数写进 span 的 annotation。在 Phoenix UI 里点开一条 trace，
+能看到根 span 自己带着 `faithfulness` / `answer_relevancy` / `refusal_check`。
+**这才是"组件级评估"真正落地的地方。**
+
+期 2 **不做任何决策**：不 rollback、不 promote、不阻断。它只负责把分数写上去。
+
+组成：
+
+| 文件 | 作用 |
+|---|---|
+| `evaluation/phoenix/online_tasks.yaml` | 任务声明（project / span_kind / evaluators / sampling_rate / cadence / window） |
+| `evaluation/phoenix/online_tasks.py` | eager 校验，配置错立刻抛 |
+| `evaluation/phoenix/span_extract.py` | 从根 AGENT span 拆出 question / answer / contexts |
+| `evaluation/phoenix/sampling.py` | 按 span_id 的确定性抽样 |
+| `evaluation/phoenix/online_worker.py` | 主循环：拉 → 去重 → 抽样 → 判官 → 写回 |
+| `evaluation/phoenix/shadow/` | 影子 canary：router + weight.json + replay + query_pool + up.ps1 |
+| `.github/workflows/canary-watch.yml` | 手动触发跑一轮 worker |
+
+**验收（spec §7 三条，一轮同时成立）**，12 条 replay 流量：
+
+```
+task                  pulled  skipped  deduped  unsampled  sampled  annotated  errored
+canary-quality            12        0        0         10        2          4        0
+canary-guardrail          12        0        0          0       12         12        0
+```
+
+① span 挂上 annotation（4+12 条，可读回、带 label/score/explanation）；
+② 采样率生效（声明 0.2，12 条抽中 2 条）；
+③ 护栏不受采样影响（同一批 span 全评 12/12）。
+`canary-quality` 的 annotated=4 = 抽中 2 条 × 2 个判官。
+
+**CI 上再跑一轮验证去重跨进程有效**（`Canary Watch` run 34461398961）：
+
+```
+canary-quality            12        0        2         10        0          0        0
+canary-guardrail          12        0       12          0        0          0        0
+```
+
+本机那轮写的 annotation，CI 这轮全看到并跳过，**0 次判官调用**。
+且 `unsampled` 仍是 10——确定性抽样在不同进程里排除的是同一批 span，
+这正是当初不用 `random.random()` 的理由（随机抽样下窗口重叠会让采样率失去意义）。
+
+##### 期 2 踩到并修掉的三个坑
+
+1. **判官必须延迟导入。** `evaluators.py` 在 import 期就要 `JUDGE_*` 三个变量
+   （期 1 的有意设计），而 `tests/` 跑在 `test.yml` 的 ubuntu-latest 上，
+   那里没有 `.env` 也没有 secrets。在 `online_worker.py` 顶层 import 它，
+   会把一直绿着的 Test workflow 弄红。改成 `run_task(judges=...)` 可注入 +
+   `default_judges()` 延迟导入，并在无凭证的干净 clone 上验证过 `tests/` 全绿。
+
+2. **注解 API 认 OTel span_id，不认 Phoenix 节点 id。** span 有两个 id：
+   顶层 `id` 是 Phoenix 全局节点 ID（base64 的 `Span:5898`），
+   `context.span_id` 才是 OTel 十六进制 id。用前者调 `get_span_annotations`
+   直接 **404**，而端点本身是存在的（不带 `span_ids` 时返回 422 校验错误）——
+   这个组合很有迷惑性，容易被误读成"服务端版本不支持这个端点"。
+
+3. **两个 workflow 的 concurrency 语义相反。**
+   `eval-gate` 用 `cancel-in-progress: true`（单 runner 串行、一次全量约 30 分钟，
+   连推两个提交会让旧的白占半小时还堵住队列）；
+   `canary-watch` 用 `cancel-in-progress: false` **只排队不取消**——
+   两轮 worker 重叠会撞去重的竞态：两个进程各自拉到同一批 span、都查到
+   "还没有同名 annotation"、于是都去调判官。去重是"查完再写"的读改写，
+   本身不原子，唯一可靠的防护是不让两轮重叠。
+
+##### 期 2 的已知局限
+
+**影子 canary 不是真线上。** 流量来自 `replay.py` 回放金标集之外的查询池，
+不是真实用户请求；两个后端是本机的 uvicorn，不是 Railway 上的服务。
+根因是 Railway 上跑不了 Milvus 管线（见 Q5）。所以期 2 验证的是**机制正确性**
+（采样、写回、去重、护栏豁免），不是"线上质量真的怎么样"。
+等 Milvus 上云，`online_worker` 只要换个 project 名就能指向真流量——
+这也是为什么影子侧的权重参数形状要和 `scripts/cf-kv-update.sh` 保持一致
+（0–100 整数），将来 monitor 不用改。
+
 ##### runner 必须装成 Windows 服务，否则活不过一个终端会话
 
 注册时如果**没带** `--runasservice`，runner 只能用 `run.cmd` 以前台进程方式跑，
@@ -998,7 +1075,15 @@ curl -i \
 1. **`/api/query` 在线上跑不通**：chroma db 缺失（见 Q5）
 2. **Worker 端鉴权是单 token**：所有调用方共用一个 EDGE_AUTH_TOKEN，不能给单个调用方撤权。如果有多客户端场景，要升级成"按 client_id 独立 token"
 3. **Railway 直连 URL 仍然公开**：理论上有人猜对 URL 能绕过 Worker 直接调 Railway。学习场景没事，生产环境要在 FastAPI 加一层 X-Internal-Auth 校验头
-4. **观察期没有自动化告警**：promote 完全靠人主观判断"观察够了没"，理想情况是接 Sentry / Grafana 自动判断错误率
+4. **观察期没有自动化告警**：promote 完全靠人主观判断"观察够了没"。
+   ~~理想情况是接 Sentry / Grafana 自动判断错误率~~ ——
+   **正在被 Phoenix 评估这条线解决，但还差最后一步**：
+   - 期 1（已完成）：合并前的离线质量门禁，见上面「门禁状态沿革」
+   - 期 2（已完成，2026-09-10）：线上评估 worker 把判官分数写回 span，见下面「期 2」
+   - **期 3（未开工）**：`monitor.py` 读线上 annotation 聚合成三态
+     （rollback / hold / promote），`promote-stable.yml` 加前置 job 调它，
+     不达标直接拒绝 promote。**这一步做完，本条遗留项才算真正闭上。**
+     现在的状态是"有信号、没决策"——分数写在 span 上了，但没有任何东西读它做判断。
 
 ---
 
