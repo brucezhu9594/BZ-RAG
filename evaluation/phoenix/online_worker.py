@@ -31,6 +31,9 @@ logger = logging.getLogger(__name__)
 
 PULL_LIMIT = 1000
 
+# 上下文来自重排后的片段——判官必须看到真正喂给 LLM 的那一份。
+_CONTEXT_SPAN_KIND = "RERANKER"
+
 
 class RoundStats(NamedTuple):
     task: str
@@ -85,6 +88,35 @@ def otel_span_id(span: dict[str, Any]) -> str:
     return str((span.get("context") or {}).get("span_id", ""))
 
 
+def _trace_id(span: dict[str, Any]) -> str:
+    return str((span.get("context") or {}).get("trace_id", ""))
+
+
+def _context_spans(
+    client: Any, task: OnlineTask, trace_ids: set[str]
+) -> dict[str, list[dict[str, Any]]]:
+    """按 trace 批量补拉上下文 span（RERANKER）。
+
+    **必须单独拉一次。** 主查询带了 span_kind=AGENT 过滤，返回的只有 AGENT span，
+    在那批结果里找 RERANKER 兄弟永远找不到——实测后果是 faithfulness 每条都看到
+    空上下文、每条都判 incorrect，分数全是垃圾，而计数（pulled/sampled/annotated）
+    看起来完全正常。这个 bug 只有去看 annotation 的**内容**才会暴露。
+    """
+    trace_ids = {t for t in trace_ids if t}
+    if not trace_ids:
+        return {}
+    spans = client.spans.get_spans(
+        project_identifier=task.project,
+        span_kind=_CONTEXT_SPAN_KIND,
+        trace_ids=sorted(trace_ids),
+        limit=PULL_LIMIT,
+    )
+    out: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for s in spans:
+        out[_trace_id(s)].append(s)
+    return out
+
+
 def _existing_annotations(
     client: Any, project: str, span_ids: list[str], names: tuple[str, ...]
 ) -> set[tuple[str, str]]:
@@ -131,11 +163,6 @@ def run_task(
     )
     pulled = len(spans)
 
-    # 同 trace 的兄弟 span 用来取上下文（RERANKER 的 output）。
-    by_trace: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for s in spans:
-        by_trace[(s.get("context") or {}).get("trace_id", "")].append(s)
-
     roots = [s for s in spans if not s.get("parent_id")]
     skipped = pulled - len(roots)
 
@@ -143,9 +170,9 @@ def run_task(
         client, task.project, [otel_span_id(s) for s in roots], task.evaluators
     )
 
-    rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    # 先选出这一轮真正要评的，再按 trace 批量补拉上下文 span。
+    candidates: list[tuple[dict[str, Any], list[str]]] = []
     deduped = unsampled = sampled = errored = 0
-
     for root in roots:
         span_id = otel_span_id(root)
         pending = [n for n in task.evaluators if (span_id, n) not in already]
@@ -155,9 +182,17 @@ def run_task(
         if not should_sample(span_id, task.sampling_rate):
             unsampled += 1
             continue
+        candidates.append((root, pending))
 
-        trace_id = (root.get("context") or {}).get("trace_id", "")
-        payload = extract_eval_input(root, by_trace[trace_id])
+    by_trace = _context_spans(
+        client, task, {_trace_id(root) for root, _ in candidates}
+    )
+
+    rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for root, pending in candidates:
+        span_id = otel_span_id(root)
+        payload = extract_eval_input(root, by_trace.get(_trace_id(root), []))
         if payload is None:
             skipped += 1
             continue

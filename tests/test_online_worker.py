@@ -33,14 +33,26 @@ def _span(span_id, kind="AGENT", parent=None, q="问题", a="答案"):
 
 
 class FakeSpans:
-    def __init__(self, spans, existing_annotations=()):
+    """假的 spans 资源。
+
+    **按 span_kind 分别返回**，而不是无脑回同一批——真实的
+    get_spans(span_kind=...) 就是这么过滤的。worker 拉 AGENT 与补拉 RERANKER
+    是两次独立调用，假 client 必须复现这一点，否则测不出"上下文没拉到"这类 bug
+    （实测踩过：主查询带 AGENT 过滤，在那批结果里找 RERANKER 兄弟永远找不到，
+    faithfulness 每条都看到空上下文、每条判 incorrect，而计数完全正常）。
+    """
+
+    def __init__(self, spans, existing_annotations=(), context_spans=()):
         self._spans = spans
+        self._context = list(context_spans)
         self._existing = list(existing_annotations)
         self.logged = []
-        self.kw = {}
+        self.calls = []
 
     def get_spans(self, **kw):
-        self.kw = kw
+        self.calls.append(kw)
+        if kw.get("span_kind") == "RERANKER":
+            return list(self._context)
         return list(self._spans)
 
     def get_span_annotations(self, **kw):
@@ -52,8 +64,8 @@ class FakeSpans:
 
 
 class FakeClient:
-    def __init__(self, spans, existing=()):
-        self.spans = FakeSpans(spans, existing)
+    def __init__(self, spans, existing=(), context_spans=()):
+        self.spans = FakeSpans(spans, existing, context_spans)
 
 
 TASK = OnlineTask(
@@ -79,10 +91,11 @@ class TestPullAndFilter:
     def test_queries_with_span_kind_and_window(self):
         c = FakeClient([_span("a")])
         run_task(c, TASK, now=NOW, judges=OK_JUDGES)
-        assert c.spans.kw["project_identifier"] == "bz-rag-canary"
-        assert c.spans.kw["span_kind"] == "AGENT"
-        assert c.spans.kw["start_time"] == NOW - timedelta(minutes=60)
-        assert c.spans.kw["end_time"] == NOW
+        first = c.spans.calls[0]
+        assert first["project_identifier"] == "bz-rag-canary"
+        assert first["span_kind"] == "AGENT"
+        assert first["start_time"] == NOW - timedelta(minutes=60)
+        assert first["end_time"] == NOW
 
     def test_non_root_spans_skipped(self):
         """只评根 span：带 parent_id 的是子 span，评它会重复计数。"""
@@ -202,3 +215,57 @@ class TestUsesOtelSpanId:
         run_task(c, TASK, now=NOW, judges=OK_JUDGES)
         assert captured["queried"] == ["deadbeef"]
         assert list(c.spans.logged[0][2]["span_id"]) == ["deadbeef"]
+
+
+class TestContextFetch:
+    """上下文（RERANKER span）必须单独补拉——这是一个真踩过的 bug 的回归测试。
+
+    主查询带 span_kind=AGENT 过滤，返回的只有 AGENT span；在那批结果里找
+    RERANKER 兄弟永远找不到。后果是 faithfulness 每条都看到空上下文、
+    每条判 incorrect，而 pulled/sampled/annotated 这些计数完全正常——
+    只有去看 annotation 的**内容**才会暴露。
+    """
+
+    @staticmethod
+    def _reranker(trace_of, contexts):
+        import json
+
+        return {
+            "id": "node-rr",
+            "name": "_rerank",
+            "span_kind": "RERANKER",
+            "parent_id": "node-root",
+            "attributes": {
+                "output.value": json.dumps(
+                    [{"page_content": c} for c in contexts], ensure_ascii=False
+                )
+            },
+            "context": {"trace_id": f"t-{trace_of}", "span_id": "rr"},
+        }
+
+    def test_context_pulled_with_reranker_kind_and_trace_ids(self):
+        c = FakeClient([_span("a")], context_spans=[self._reranker("a", ["片段一"])])
+        run_task(c, TASK, now=NOW, judges=OK_JUDGES)
+        second = c.spans.calls[1]
+        assert second["span_kind"] == "RERANKER"
+        assert second["trace_ids"] == ["t-a"]
+
+    def test_judge_receives_non_empty_contexts(self):
+        """核心断言：判官拿到的 contexts 不能是空的。"""
+        seen = {}
+
+        def spy(output, input=None, **_):  # noqa: A002
+            seen["contexts"] = output["contexts"]
+            return {"name": "refusal_check", "score": 1.0, "label": "ok", "explanation": ""}
+
+        c = FakeClient(
+            [_span("a")], context_spans=[self._reranker("a", ["片段一", "片段二"])]
+        )
+        run_task(c, TASK, now=NOW, judges={"refusal_check": spy})
+        assert seen["contexts"] == ["片段一", "片段二"]
+
+    def test_no_context_fetch_when_nothing_sampled(self):
+        """一条都没抽中时不该白打一次网络。"""
+        c = FakeClient([_span(f"s{i}") for i in range(5)])
+        run_task(c, TASK._replace(sampling_rate=0.0), now=NOW, judges=OK_JUDGES)
+        assert len(c.spans.calls) == 1
