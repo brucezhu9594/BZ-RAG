@@ -1,0 +1,33 @@
+# 线上评估任务声明。复刻 Arize 的 template / task 分离：
+# template（判官）就是 evaluation/phoenix/evaluators.py 里那几个，离线线上共用一份；
+# task（本文件）只描述"对哪个 project 的哪种 span、按什么频率、抽多少比例、用哪几个判官"。
+#
+# span_kind 用 AGENT 而不是 spec §4.8 原文的 LLM：真实 trace 里一次生成会产出两条
+# LLM span（langchain 与 openai 两个 instrumentor 各记一遍），多轮时还会多出
+# _rewrite_query 的 LLM span。根 AGENT span 一次请求恰好一条，且 input.value /
+# output.value 直接就是问题与答案，不用去 prompt 里做字符串切割。
+#
+# 线上没有 ground truth，所以只有三个判官可用：faithfulness / answer_relevancy /
+# refusal_check。contextual_precision 与 contextual_recall 的 prompt 要 expected，
+# 放进来会被 online_tasks.py 拒绝。
+
+- name: canary-quality
+  project: bz-rag-canary
+  span_kind: AGENT
+  evaluators: [faithfulness, answer_relevancy]
+  sampling_rate: 0.2          # 唯一的成本旋钮
+  cadence: continuous         # continuous | historical
+  # 窗口开到触发间隔的 2 倍。去重能防重复评，但**防不住间隙**——调度一延迟，
+  # 就有一段 span 永远落在任何窗口之外、再也不会被评。重叠部分全被去重挡掉，
+  # 不产生额外判官调用，纯赚。
+  window_minutes: 60
+
+- name: canary-guardrail
+  project: bz-rag-canary
+  span_kind: AGENT
+  evaluators: [refusal_check]
+  # 护栏型不采样：拒答/空答本来就稀有，采样会把它们采没，采样就失去意义。
+  # 这是从 Arize 抄来的口径，不是随手写的 1.0。
+  sampling_rate: 1.0
+  cadence: continuous
+  window_minutes: 60
