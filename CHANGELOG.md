@@ -1,3 +1,10 @@
+## [1.5.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.5.0...v1.5.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* **eval:** worker 补拉 RERANKER span，否则 faithfulness 永远看到空上下文 ([539097c](https://github.com/brucezhu9594/BZ-RAG/commit/539097c7085420b98b4ea6eb6186c034b5ed07c4))
+
 # [1.5.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.6...v1.5.0) (2026-09-10)
 
 
