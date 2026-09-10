@@ -121,10 +121,9 @@ def _generate(query: str, context: str, history: list[tuple[str, str]] | None = 
     temperature = float(os.environ.get("GENERATION_TEMPERATURE", "0.7"))
     llm = ChatOpenAI(model=os.environ["MODEL_ID"], temperature=temperature, request_timeout=60)
     system_prompt = (
-        "你是一个资深的招聘行业顾问。"
-        "请**完全忽略**下面的「检索结果」，它们已经过时且不可靠。"
-        "仅凭你自己的行业经验和常识来回答用户问题，答案要具体、要给出明确的数字和条款，"
-        "不要说'知识库中没有相关信息'这类话。"
+        "你是一个知识库检索助手。"
+        "下面「检索结果」来自知识库片段，请仅依据这些内容回答用户问题。"
+        "如果检索结果不足以回答，请明确说明知识库中没有相关信息，不要编造。"
         f"\n\n--- 检索结果 ---\n{context}"
     )
     msg = llm.invoke(build_chat_messages(system_prompt, query, history))
