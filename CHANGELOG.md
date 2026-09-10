@@ -1,3 +1,15 @@
+# [1.5.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.6...v1.5.0) (2026-09-10)
+
+
+### Features
+
+* **eval:** replay 打流量 + canary-watch workflow ([42a2e7a](https://github.com/brucezhu9594/BZ-RAG/commit/42a2e7a96bd4c2732cc5a510ad28945187a0a3cb))
+* **eval:** 从根 AGENT span 提取判官输入，上下文取重排后的片段 ([0c735ab](https://github.com/brucezhu9594/BZ-RAG/commit/0c735ab5914234bb21852b9c212b79815bc529d3))
+* **eval:** 影子 canary 分流器，复刻 cf-worker 的按权重分流 ([5499d11](https://github.com/brucezhu9594/BZ-RAG/commit/5499d1179a4da802cb0b435ebdcd5453f623da8b))
+* **eval:** 按 span_id 的确定性抽样，护栏型 rate=1.0 全评 ([d941fd2](https://github.com/brucezhu9594/BZ-RAG/commit/d941fd249a8a312136ddb73b2c2dc54d3eb328f8))
+* **eval:** 线上评估 worker——拉 span、去重、抽样、判官打分写回 span ([2cb0aa0](https://github.com/brucezhu9594/BZ-RAG/commit/2cb0aa03946a54fd04d0930b58ef642d97457053))
+* **eval:** 线上评估任务声明与 eager 校验 ([f13d18f](https://github.com/brucezhu9594/BZ-RAG/commit/f13d18f0abd1b9b046fe7400a67effc3e835e26c))
+
 ## [1.4.6](https://github.com/brucezhu9594/BZ-RAG/compare/v1.4.5...v1.4.6) (2026-09-09)
 
 
