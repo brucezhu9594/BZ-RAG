@@ -1,0 +1,76 @@
+name: Canary Watch
+
+# 期 2 只留手动触发，**有意不加 cron**。影子 canary 是 evaluation/phoenix/shadow/up.ps1
+# 起的三个前台进程，关机或关终端就没了、大部分时间不在跑；挂上 */30 的 cron 等于
+# 每天 48 个"拉到 0 条 span 就结束"的空转 job。而且 GitHub 对连续 60 天无活动的
+# 仓库会自动停掉 scheduled workflow，那种"以为在跑其实早停了"的状态比没有更糟。
+# 等影子 canary 也做成服务、或者 Milvus 真上云之后再把 cron 加回来；
+# 加回来时记得让 online_tasks.yaml 的 window_minutes 保持在触发间隔的 2 倍以上
+# （去重能防重复评，但防不住调度延迟造成的窗口间隙）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  watch:
+    # 与 eval-gate.yml 同一台机器：worker 要访问 localhost:6006 的 Phoenix。
+    runs-on: [self-hosted, bz-rag-local]
+    timeout-minutes: 30
+    env:
+      # 只写大写这一个。GitHub Actions 的 env 键名大小写不敏感，同时写
+      # NO_PROXY 和 no_proxy 会被判成重复定义、整个 workflow 文件被拒收
+      # （eval-gate.yml 上实测踩过：0 个 job、workflow 名回退成文件路径、无日志）。
+      NO_PROXY: localhost,127.0.0.1
+      PHOENIX_ENDPOINT: http://localhost:6006
+      PHOENIX_COLLECTOR_ENDPOINT: http://localhost:6006
+      PYTHONIOENCODING: utf-8
+      # 凭证走 Repository secrets，不依赖 runner 本机 .env——checkout 出来的是
+      # 全新工作目录，.env 在 .gitignore 里不会进去（spec §5 原文说走 .env，已被实测推翻）。
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ZHIPUAI_API_KEY: ${{ secrets.ZHIPUAI_API_KEY }}
+      JUDGE_OPENAI_API_KEY: ${{ secrets.JUDGE_OPENAI_API_KEY }}
+      OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+      MODEL_ID: ${{ secrets.MODEL_ID }}
+      JUDGE_OPENAI_BASE_URL: ${{ secrets.JUDGE_OPENAI_BASE_URL }}
+      JUDGE_MODEL_ID: ${{ secrets.JUDGE_MODEL_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ⚠️ 本文件所有 run 块必须是**纯 ASCII**（说明写在 YAML 注释里，注释不进生成的脚本）。
+      # GitHub 把 run 块写成 UTF-8 无 BOM 的 .ps1，powershell 5.1 在代码页 936 下按 GBK
+      # 解码，中文的 UTF-8 字节含非法 GBK 序列，解码器丢字节会吃掉字符串终止符，
+      # 报出与真因毫无关系的 Missing closing '}'（eval-gate.yml 上实测踩过）。
+      #
+      # 复用 eval-gate.yml 建的同一个 venv（在 RUNNER_WORKSPACE 下、checkout 目录之外）。
+      # 不重建：两个 workflow 依赖完全一致，重建只是白白多花几分钟下载。
+      - name: Reuse venv
+        run: |
+          $venv = Join-Path $env:RUNNER_WORKSPACE "_venv"
+          if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
+            Write-Host "::error::venv not found at $venv. Run the Eval Gate workflow once first."
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $venv "Scripts") -Encoding utf8
+
+      # 必须写 curl.exe：powershell 5.1 里 curl 是 Invoke-WebRequest 的别名。
+      - name: Check Phoenix is up
+        run: |
+          $code = & curl.exe -s -o NUL -w "%{http_code}" --max-time 10 http://localhost:6006/readyz
+          Write-Host "phoenix /readyz -> $code"
+          if ($code -ne "200") {
+            Write-Host "::error::Phoenix is not ready (/readyz returned $code)."
+            exit 1
+          }
+
+      # PowerShell 的 run 多命令块只有最后一条的退出码算数，所以显式检查。
+      - name: Run online eval worker (one round)
+        run: |
+          python -m evaluation.phoenix.online_worker
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::online worker round failed"
+            exit $LASTEXITCODE
+          }
