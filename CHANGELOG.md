@@ -1,3 +1,11 @@
+# [1.6.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.5.1...v1.6.0) (2026-09-11)
+
+
+### Features
+
+* **eval:** monitor 三态判定，复用离线那套聚合引擎 ([e442d49](https://github.com/brucezhu9594/BZ-RAG/commit/e442d494fdc60f4e4616560b759ff72df75549f3))
+* **eval:** 权重归零执行，影子侧写文件、云侧调 cf-kv-update.sh ([8978656](https://github.com/brucezhu9594/BZ-RAG/commit/8978656ec439d2092e1103a60b4f8fc0ca441181))
+
 ## [1.5.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.5.0...v1.5.1) (2026-09-10)
 
 
