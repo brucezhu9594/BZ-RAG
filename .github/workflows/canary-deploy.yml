@@ -125,6 +125,24 @@ jobs:
             exit 1
           fi
 
+          # 白名单判定：必须**明确看到**成功标志才算成功。
+          # 2026-09-11 实测的教训：Railway trial 到期时返回
+          #   {"code":"UPLOAD_FAILED","error":"Your trial has expired. ..."}
+          # 这串字符一个都不匹配 FAIL_PATTERN，于是上面那个黑名单检查放行，
+          # 脚本打印"deployment submitted successfully"，把失败一路推到 4 分钟后的
+          # 健康检查才炸——而且报出来的症状（服务起不来）和真实原因（压根没上传）
+          # 完全不沾边，排查时严重误导。
+          #
+          # 黑名单注定漏：配额、鉴权、网络、限流……每一种新错误都得回来补一次正则。
+          # 反过来做才对：没看到 "status": "SUCCESS" 就一律判失败。
+          # 代价是 railway 改输出格式时会误报失败，但那种失败会立刻带着 deploy.log
+          # 全文炸在眼前，比"以为部署了其实没部署"安全得多。
+          if ! grep -qE "$SUCCESS_PATTERN" deploy.log; then
+            echo "ERROR: deploy.log 里没有出现成功标志（\"status\": \"SUCCESS\"），判定部署失败。"
+            echo "       上面的 deploy.log 全文就是 Railway 的原始回包，看它说了什么。"
+            exit 1
+          fi
+
           echo "Canary deployment submitted successfully."
 
       - name: Wait for canary health
