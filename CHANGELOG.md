@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.6.0...v1.7.0) (2026-09-11)
+
+
+### Features
+
+* **eval:** harvest 把线上失败样本捞进人工分诊队列 ([92d075c](https://github.com/brucezhu9594/BZ-RAG/commit/92d075c4f22f3061a537b0f67a2f3f99195a4dc6))
+
 # [1.6.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.5.1...v1.6.0) (2026-09-11)
 
 
