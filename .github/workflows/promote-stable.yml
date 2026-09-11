@@ -17,7 +17,56 @@ permissions:
   contents: read
 
 jobs:
+  # 质量前置门：monitor 说不达标就不许晋级。
+  # 这是 docs/CD-pipeline.md §10 第 4 条遗留项（"观察期没有自动化告警，promote
+  # 完全靠人主观判断观察够了没"）的正解——把判据从"人觉得可以了"换成
+  # "线上评分达标了"。
+  #
+  # 必须跑在 self-hosted 上：monitor 要访问 localhost:6006 的 Phoenix。
+  # 下面的 promote job 仍跑 ubuntu-latest（它只调 Railway / Cloudflare API）。
+  gate:
+    runs-on: [self-hosted, bz-rag-local]
+    timeout-minutes: 15
+    env:
+      # 只写大写这一个：GitHub 的 env 键名大小写不敏感，同时写 NO_PROXY 与
+      # no_proxy 会被判成重复定义、整个文件被拒收（eval-gate.yml 上实测踩过）。
+      NO_PROXY: localhost,127.0.0.1
+      PHOENIX_ENDPOINT: http://localhost:6006
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ⚠️ run 块必须纯 ASCII：GitHub 把它写成 UTF-8 无 BOM 的 .ps1，
+      # powershell 5.1 在代码页 936 下按 GBK 解码，中文含非法 GBK 序列会吃掉
+      # 字符串终止符，报出与真因无关的 Missing closing '}'。
+      - name: Reuse venv
+        run: |
+          $venv = Join-Path $env:RUNNER_WORKSPACE "_venv"
+          if (-not (Test-Path (Join-Path $venv "Scripts\python.exe"))) {
+            Write-Host "::error::venv not found at $venv. Run the Eval Gate workflow once first."
+            exit 1
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $venv "Scripts") -Encoding utf8
+
+      # 这里**不**用 continue-on-error：前置门就是要在非 promote 时挡住。
+      # hold（exit 2）同样挡住——样本不足意味着还判不了，此时晋级是赌博。
+      - name: Quality gate
+        run: |
+          python -m evaluation.phoenix.monitor --project bz-rag-canary --window-minutes 180
+          $code = $LASTEXITCODE
+          if ($code -eq 0) {
+            Write-Host "monitor says promote - gate passed"
+          } elseif ($code -eq 2) {
+            Write-Host "::error::monitor says HOLD (not enough samples). Let the canary run longer, then retry."
+            exit 1
+          } else {
+            Write-Host "::error::monitor says ROLLBACK (criteria not met). Promotion refused."
+            exit 1
+          }
+
   promote:
+    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
