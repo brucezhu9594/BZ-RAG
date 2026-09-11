@@ -10,10 +10,6 @@ sys.path.insert(0, PROJECT_ROOT)
 # 调高 DeepEval per-task 超时（默认 180s），给 LLM judge + 重试 + 节流留余量。
 os.environ.setdefault("DEEPEVAL_PER_TASK_TIMEOUT_SECONDS_OVERRIDE", "1800")
 
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langfuse import Langfuse, observe
-
 from deepeval import evaluate
 from deepeval.evaluate import AsyncConfig, DisplayConfig
 from deepeval.metrics import (
@@ -23,6 +19,9 @@ from deepeval.metrics import (
     FaithfulnessMetric,
 )
 from deepeval.test_case import LLMTestCase
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langfuse import Langfuse, observe
 
 from evaluation.build_dataset import DATASET_NAME
 from evaluation.deepeval_judge import GLMJudge

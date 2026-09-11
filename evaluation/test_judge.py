@@ -52,6 +52,7 @@ class TestRetryOnRateLimit:
     def _make_rate_limit_err():
         """Build a minimal openai.RateLimitError without a real httpx.Response."""
         from unittest.mock import MagicMock
+
         from openai import RateLimitError
 
         fake_response = MagicMock()
@@ -63,6 +64,7 @@ class TestRetryOnRateLimit:
     def _make_timeout_err():
         """Build an openai.APITimeoutError."""
         from unittest.mock import MagicMock
+
         from openai import APITimeoutError
 
         return APITimeoutError(request=MagicMock())
@@ -74,8 +76,9 @@ class TestRetryOnRateLimit:
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
 
-        from evaluation.deepeval_judge import GLMJudge
         from unittest.mock import MagicMock
+
+        from evaluation.deepeval_judge import GLMJudge
 
         judge = GLMJudge()
         err = self._make_timeout_err()
@@ -109,8 +112,9 @@ class TestRetryOnRateLimit:
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
 
-        from evaluation.deepeval_judge import GLMJudge
         from unittest.mock import MagicMock
+
+        from evaluation.deepeval_judge import GLMJudge
 
         judge = GLMJudge()
         err = self._make_rate_limit_err()
@@ -146,8 +150,9 @@ class TestRetryOnRateLimit:
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
 
-        from evaluation.deepeval_judge import GLMJudge
         from openai import RateLimitError
+
+        from evaluation.deepeval_judge import GLMJudge
 
         judge = GLMJudge()
         err = self._make_rate_limit_err()

@@ -1,5 +1,4 @@
 """api/milvus_rag.py 单测：mock 外部依赖，验证编排与 thread_id 透传。"""
-from unittest.mock import MagicMock
 
 from langchain_core.documents import Document
 

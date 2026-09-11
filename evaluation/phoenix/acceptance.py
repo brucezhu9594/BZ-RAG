@@ -143,7 +143,12 @@ def _check_shape(node) -> None:
         return
     if isinstance(node, ast.Compare):
         _check_value_shape(node.left)
-        for op, comparator in zip(node.ops, node.comparators):
+        # strict=True，不是 `ruff --fix` 默认给的 strict=False。ast.Compare 的 ops 与
+        # comparators 语法上保证等长（`a < b < c` → ops=[Lt,Lt]、comparators=[b,c]），
+        # 这里是把那个不变量钉死：真出现畸形节点要当场炸。strict=False 只是把"静默截断"
+        # 写明白了让 lint 闭嘴，本质没变——而在门禁引擎里静默少判一个比较条件，意味着
+        # pass_when 被部分求值后仍然返回 True，是会让门禁放行坏版本的那种错。
+        for op, comparator in zip(node.ops, node.comparators, strict=True):
             if type(op) not in _CMP:
                 # 白名单只登记了 == != < <= > >=；is/is not/in/not in 等
                 # 语法上合法但未登记的运算符（最容易发生在有人把 == 手滑
@@ -192,7 +197,8 @@ def _eval_tree(tree: ast.expr, rec: Record) -> bool:
             results = [run(v) for v in node.values]
             return all(results) if isinstance(node.op, ast.And) else any(results)
         left = val(node.left)
-        for op, comparator in zip(node.ops, node.comparators):
+        # strict=True 的理由同 _check_shape，见那里的注释。
+        for op, comparator in zip(node.ops, node.comparators, strict=True):
             right = val(comparator)
             if left is None or right is None:
                 return False

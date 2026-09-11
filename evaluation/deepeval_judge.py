@@ -24,7 +24,7 @@ from tenacity import (
 def _is_retryable(exc: BaseException) -> bool:
     # 限流 / 超时 / 连接中断都重试 —— 智谱 GLM 偶发 APITimeoutError，
     # 不重试会让 DeepEval metric 阶段整轮崩掉。
-    if isinstance(exc, (RateLimitError, APITimeoutError, APIConnectionError)):
+    if isinstance(exc, RateLimitError | APITimeoutError | APIConnectionError):
         return True
     if isinstance(exc, APIError):
         status = getattr(exc, "status_code", None) or getattr(

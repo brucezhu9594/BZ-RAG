@@ -25,6 +25,16 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "evaluation/*" = ["E402"]  # 评测脚本里允许 import 在顶部之外
+# 这两个文件的 E402 是刻意的，不是疏漏：它们必须先完成环境副作用、再触发 import。
+#   api/main.py             —— 先 load_dotenv()（否则 deepeval 在 import 期就把
+#                              CONFIDENT_API_KEY 缓存成 None，tracing 静默失效）、
+#                              先给 aiohttp 打 trust_env 补丁，然后才 import fastapi。
+#   api/milvus_rag_phoenix.py —— 先设 NO_PROXY（本机 Privoxy 会拦 localhost，
+#                              pymilvus 的 gRPC 和 phoenix collector 都会被拦住 hang），
+#                              才能 import pymilvus / phoenix。
+# 精确到文件名而不是写 "api/*"：api 目录下其它文件里真出现的 E402 仍然要被抓出来。
+"api/main.py" = ["E402"]
+"api/milvus_rag_phoenix.py" = ["E402"]
 
 [tool.ruff.format]
 quote-style = "double"
