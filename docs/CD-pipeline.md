@@ -686,12 +686,46 @@ monitor state = hold (exit 2)
 全部正确捞回，写进 `bz-rag-harvested`，`expected_response` 留空待人补、
 `metadata.source_span_id` 可回跳原 span。
 
+##### 三态的真机验收（2026-09-11 补做）
+
+原先只有 `hold` 一态在真机上跑出来过，另两态靠单测的受控数据覆盖。补打了两轮
+replay 流量之后，三态都用真实流量、真实判官、真实 CLI 退出码演了一遍：
+
+| 判定 | 退出码 | 命令 | 依据 |
+|---|---|---|---|
+| `promote` | 0 | `--window-minutes 30` | faithfulness `pass_rate` 1.000（n=25）、refusal_check 1.000（n=150），两项都过 `min_samples: 20` |
+| `rollback` | 1 | `--window-minutes 180` | refusal_check `pass_rate` 0.873 < 0.98（n=110），faithfulness 1.000（n=23）通过 |
+| `hold` | 2 | `--window-minutes 2` | 窗口内两项样本都是 0，不足 20 |
+
+两批流量的构造方式：
+
+- **`rollback` 那批**用仓库里原本的 `shadow/query_pool.json`（12 条，刻意取自 golden
+  集之外）。110 条请求里 13 条被 `refusal_check` 判 `refused`，集中在 5 个问题上
+  （「平台抽成比例是多少」5 次、「禾蛙盒子和普通发单有什么区别」4 次等）。**这不是
+  judge 抽风，是真实的知识库缺口**——逐条看 `explanation` 确认过：答案文本本身就写了
+  "检索结果中没有提供直接的信息对比"，判官只是如实标注。所以 `rollback` 是正确判定。
+- **`promote` 那批**把上面那 5 个问题从池子里去掉，剩 7 条打 150 次。这等价于"harvest
+  发现的知识库缺口已经补齐"之后的状态——正是 `promote` 该出现的场景。池子文件放在
+  临时目录，没有改仓库里的 `query_pool.json`（那个池子有测试钉住它与
+  `test_dataset.json` 零重合）。
+
+顺带验证了 worker 的去重：第二轮 worker 拉到 220 条 span，其中 quality 任务 dedupe
+掉 23 条、guardrail dedupe 掉 110 条，只对新流量调判官。
+
+`hold` 的记分卡上两条 criterion 都印 `FAIL`，但总判定是 `hold` 不是 `rollback`——
+这是对的，"hold 优先于 rollback"（样本不足时贸然回滚会把好版本也打回去）。
+记分卡印的是**单条 criterion 的达标与否**，总判定由 `decide()` 另算。
+
 ##### 期 3 的三处边界
 
-**① 真机只能看到 hold 这一态。** `criteria.yaml` 的 `online` 段两条 criteria 都要
-`min_samples: 20`，而当前 faithfulness 只有 2 条（采样率 0.2）、refusal_check 16 条。
-`rollback` 与 `promote` 由单测的受控数据覆盖（含"hold 优先"这条关键语义）。
-要在真机演全三态，需先打约 100 条 replay 流量。
+**① monitor 分不清 stable 和 canary 的流量。** 影子分流器的两个后端按设计写进
+**同一个** `PHOENIX_PROJECT_NAME=bz-rag-canary`（见 `shadow/router.py` 模块注释），
+而 span 上**没有任何 `APP_VERSION` / backend 属性**（实测 AGENT span 的 attributes
+只有 `input.value` / `output.value` 及其 mime_type）。后果是 monitor 的判定覆盖的是
+两个后端的混合流量：上面那次 `rollback`，13 条拒答里有多少来自 stable、多少来自
+canary，数据上分不出来。**机制是对的，但"canary 质量差 → 回滚 canary"这层语义还没被
+数据坐实。** 要补的话：让两个 uvicorn 各自把 `APP_VERSION` 打成 span 属性，monitor
+加一层过滤。真云侧上 Milvus 之后这个问题会自然消失（两个 Railway service 本就分开）。
 
 **② spec 说的"promote 达标自动开 GitHub issue"未实现。** 改由 `promote-stable.yml`
 的前置门实现"要人确认"这个诉求——不达标直接拒绝晋级，比开 issue 更硬。
@@ -1200,8 +1234,15 @@ curl -i \
    - **期 3（已完成，2026-09-11）**：`monitor.py` 聚合三态，`canary-watch` 自动
      rollback，`promote-stable.yml` 加前置门不达标拒绝晋级。见下面「期 3」。
      **本条遗留项到此闭上**——promote 的判据从"人觉得观察够了"换成了"线上评分达标"。
-     仍有一处未自动化：spec 说 promote 达标要自动开 GitHub issue，
-     当前只打印判定，由前置门硬挡代替（不达标直接拒绝晋级，比开 issue 更硬）。
+     三态已于 2026-09-11 用真实流量各演了一遍（promote/rollback/hold 分别退 0/1/2，
+     见「期 3」的真机验收表）。
+     仍有两处未做：spec 说 promote 达标要自动开 GitHub issue，当前只打印判定，
+     由前置门硬挡代替（不达标直接拒绝晋级，比开 issue 更硬）；以及下面第 5 条。
+5. **monitor 判定的是 stable + canary 的混合流量**：影子分流器两个后端按设计写进同一个
+   Phoenix project，且 span 上没有 `APP_VERSION` / backend 属性，所以分不出一条拒答来自
+   哪个后端。机制正确，但"canary 差 → 回滚 canary"这层因果还没被数据坐实。补法：两个
+   uvicorn 各自把 `APP_VERSION` 打成 span 属性 + monitor 加过滤；真云侧上 Milvus 之后
+   （两个 Railway service 天然分开）这个问题自然消失。
 
 ---
 
