@@ -43,9 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         for i in range(args.count):
             q = random.choice(pool)
             try:
-                r = client.post(
-                    f"{ROUTER_URL}/api/milvus/query-phoenix", json={"query": q}
-                )
+                r = client.post(f"{ROUTER_URL}/api/milvus/query-phoenix", json={"query": q})
                 b = r.headers.get("x-bz-backend", "?")
                 backends[b] = backends.get(b, 0) + 1
                 print(f"[{i + 1}/{args.count}] {b:<7} {r.status_code}  {q[:26]}")

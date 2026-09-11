@@ -51,7 +51,9 @@ class Criterion:
         if self.metric == "average" and self.threshold is None:
             raise ValueError(f"{self.annotation}: metric=average 必须给 threshold")
         if self.metric == "pass_rate" and (self.pass_when is None or self.min_pass_rate is None):
-            raise ValueError(f"{self.annotation}: metric=pass_rate 必须给 pass_when 与 min_pass_rate")
+            raise ValueError(
+                f"{self.annotation}: metric=pass_rate 必须给 pass_when 与 min_pass_rate"
+            )
         if self.direction not in ("maximize", "minimize"):
             raise ValueError(f"direction 必须是 maximize/minimize，收到 {self.direction!r}")
         if self.max_error_rate is not None and not (0.0 <= self.max_error_rate <= 1.0):
@@ -118,9 +120,12 @@ def record_count(name: str) -> int:
 #                                   不经过这里。
 
 _CMP = {
-    ast.Eq: operator.eq, ast.NotEq: operator.ne,
-    ast.Lt: operator.lt, ast.LtE: operator.le,
-    ast.Gt: operator.gt, ast.GtE: operator.ge,
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
 }
 
 _ALLOWED_NAMES = ("score", "label")
@@ -239,23 +244,33 @@ def _evaluate_one(c: Criterion) -> Outcome:
         error_rate = len(errored) / total
         if len(errored) > max(1, c.max_error_rate * total):
             return Outcome(
-                c, False, None, required, len(usable),
+                c,
+                False,
+                None,
+                required,
+                len(usable),
                 f"error rate {len(errored)}/{total} ({error_rate:.3f}) "
                 f"exceeds max_error_rate {c.max_error_rate}{err_note}",
             )
 
     if not usable:
-        return Outcome(c, False, None, required, 0,
-                       f"no {c.annotation} scores found{err_note}")
+        return Outcome(c, False, None, required, 0, f"no {c.annotation} scores found{err_note}")
 
     if c.metric == "average":
         numeric = [r.score for r in usable if r.score is not None]
         if not numeric:
-            return Outcome(c, False, None, required, 0,
-                           f"no {c.annotation} numeric scores found{err_note}")
+            return Outcome(
+                c, False, None, required, 0, f"no {c.annotation} numeric scores found{err_note}"
+            )
         if len(numeric) < c.min_samples:
-            return Outcome(c, False, sum(numeric) / len(numeric), required, len(numeric),
-                           f"insufficient samples: {len(numeric)} < {c.min_samples}{err_note}")
+            return Outcome(
+                c,
+                False,
+                sum(numeric) / len(numeric),
+                required,
+                len(numeric),
+                f"insufficient samples: {len(numeric)} < {c.min_samples}{err_note}",
+            )
         observed = sum(numeric) / len(numeric)
         passed = observed >= c.threshold if c.direction == "maximize" else observed <= c.threshold
         # L345：reason 必须陈述实际发生的关系，不能把"检查式"原样印出来——
@@ -265,12 +280,24 @@ def _evaluate_one(c: Criterion) -> Outcome:
         # 真正成立的方向（maximize 方向下是 <，minimize 方向下是 >）。
         check_cmp = ">=" if c.direction == "maximize" else "<="
         shown_cmp = check_cmp if passed else ("<" if c.direction == "maximize" else ">")
-        return Outcome(c, passed, observed, required, len(numeric),
-                       f"mean {observed:.3f} {shown_cmp} {c.threshold}{err_note}")
+        return Outcome(
+            c,
+            passed,
+            observed,
+            required,
+            len(numeric),
+            f"mean {observed:.3f} {shown_cmp} {c.threshold}{err_note}",
+        )
 
     if len(usable) < c.min_samples:
-        return Outcome(c, False, None, required, len(usable),
-                       f"insufficient samples: {len(usable)} < {c.min_samples}{err_note}")
+        return Outcome(
+            c,
+            False,
+            None,
+            required,
+            len(usable),
+            f"insufficient samples: {len(usable)} < {c.min_samples}{err_note}",
+        )
     try:
         passing = sum(1 for r in usable if _eval_tree(c._pass_when_ast, r))
     except (ValueError, TypeError) as e:
@@ -279,14 +306,19 @@ def _evaluate_one(c: Criterion) -> Outcome:
         # TypeError，只有真的比较到具体值才暴露。窄 try/except 把它坐实成
         # 这一条 criterion 的 FAIL Outcome，而不是让异常裸奔到 evaluate_all
         # 炸掉整批——这样"就地显形，而不是拖垮整批"这句话才是真的成立。
-        return Outcome(c, False, None, required, len(usable),
-                       f"invalid pass_when: {e}{err_note}")
+        return Outcome(c, False, None, required, len(usable), f"invalid pass_when: {e}{err_note}")
     observed = passing / len(usable)
     passed = observed >= c.min_pass_rate
     # L345：同上——FAIL 时不能原样打印检查式 ">="，改打印实际成立的 "<"。
     shown_cmp = ">=" if passed else "<"
-    return Outcome(c, passed, observed, required, len(usable),
-                   f"pass rate {observed:.3f} {shown_cmp} {c.min_pass_rate}{err_note}")
+    return Outcome(
+        c,
+        passed,
+        observed,
+        required,
+        len(usable),
+        f"pass rate {observed:.3f} {shown_cmp} {c.min_pass_rate}{err_note}",
+    )
 
 
 def evaluate_all(criteria: list[Criterion]) -> list[Outcome]:
@@ -303,8 +335,12 @@ def load_criteria(path: str, section: str) -> list[Criterion]:
 
 
 def format_scoreboard(outcomes: list[Outcome]) -> str:
-    lines = ["", "Acceptance Criteria", "-" * 78,
-             f"{'annotation':<22}{'metric':<12}{'observed':>10}{'required':>10}{'n':>6}  verdict"]
+    lines = [
+        "",
+        "Acceptance Criteria",
+        "-" * 78,
+        f"{'annotation':<22}{'metric':<12}{'observed':>10}{'required':>10}{'n':>6}  verdict",
+    ]
     for o in outcomes:
         obs = "n/a" if o.observed is None else f"{o.observed:.3f}"
         lines.append(

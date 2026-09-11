@@ -36,8 +36,11 @@ def test_direction_minimize_inverts_comparison():
     for s in (100.0, 200.0):
         acc.record("latency_ms", s)
     (out,) = acc.evaluate_all(
-        [acc.Criterion(annotation="latency_ms", metric="average",
-                       threshold=800, direction="minimize")]
+        [
+            acc.Criterion(
+                annotation="latency_ms", metric="average", threshold=800, direction="minimize"
+            )
+        ]
     )
     assert out.passed
 
@@ -46,8 +49,14 @@ def test_pass_rate_uses_pass_when_expression():
     for s in (1.0, 1.0, 1.0, 0.0):
         acc.record("faithfulness", s)
     (out,) = acc.evaluate_all(
-        [acc.Criterion(annotation="faithfulness", metric="pass_rate",
-                       pass_when="score >= 0.5", min_pass_rate=0.9)]
+        [
+            acc.Criterion(
+                annotation="faithfulness",
+                metric="pass_rate",
+                pass_when="score >= 0.5",
+                min_pass_rate=0.9,
+            )
+        ]
     )
     assert not out.passed
     assert out.observed == pytest.approx(0.75)
@@ -57,13 +66,20 @@ def test_pass_when_can_read_label():
     acc.record("recall", 0.5, label="partial")
     acc.record("recall", 0.0, label="incorrect")
     (out,) = acc.evaluate_all(
-        [acc.Criterion(annotation="recall", metric="pass_rate",
-                       pass_when="label != 'incorrect'", min_pass_rate=1.0)]
+        [
+            acc.Criterion(
+                annotation="recall",
+                metric="pass_rate",
+                pass_when="label != 'incorrect'",
+                min_pass_rate=1.0,
+            )
+        ]
     )
     assert not out.passed
 
 
 # ——— 四条取舍，逐条锁死 ———
+
 
 def test_missing_annotation_fails_rather_than_passing_vacuously():
     acc.record("something_else", 1.0)
@@ -89,8 +105,10 @@ def test_all_criteria_are_evaluated_even_when_the_first_fails():
     acc.record("a", 0.0)
     acc.record("b", 1.0)
     outs = acc.evaluate_all(
-        [acc.Criterion(annotation="a", metric="average", threshold=0.5),
-         acc.Criterion(annotation="b", metric="average", threshold=0.5)]
+        [
+            acc.Criterion(annotation="a", metric="average", threshold=0.5),
+            acc.Criterion(annotation="b", metric="average", threshold=0.5),
+        ]
     )
     assert len(outs) == 2
     assert not outs[0].passed
@@ -130,7 +148,7 @@ def test_load_criteria_reads_the_named_section(tmp_path):
         "online:\n"
         "  - annotation: faithfulness\n"
         "    metric: pass_rate\n"
-        "    pass_when: \"score >= 0.5\"\n"
+        '    pass_when: "score >= 0.5"\n'
         "    min_pass_rate: 0.85\n",
         encoding="utf-8",
     )
@@ -269,9 +287,7 @@ def test_max_error_rate_boundary_just_above_threshold_triggers_the_gate():
         acc.record("faithfulness", s)
     acc.record("faithfulness", None, error="judge timeout")
     acc.record("faithfulness", None, error="judge timeout")
-    (out,) = acc.evaluate_all(
-        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
-    )
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)])
     assert not out.passed
     assert "exceeds max_error_rate" in out.reason
     assert "errored" in out.reason
@@ -287,11 +303,16 @@ def test_max_error_rate_blocks_the_19_of_20_errored_scenario():
         acc.record("faithfulness", None, error="judge timeout")
     outs = acc.evaluate_all(
         [
-            acc.Criterion(annotation="faithfulness", metric="average",
-                          threshold=0.8, max_error_rate=0.2),
-            acc.Criterion(annotation="faithfulness", metric="pass_rate",
-                          pass_when="score >= 0.5", min_pass_rate=0.9,
-                          max_error_rate=0.2),
+            acc.Criterion(
+                annotation="faithfulness", metric="average", threshold=0.8, max_error_rate=0.2
+            ),
+            acc.Criterion(
+                annotation="faithfulness",
+                metric="pass_rate",
+                pass_when="score >= 0.5",
+                min_pass_rate=0.9,
+                max_error_rate=0.2,
+            ),
         ]
     )
     assert len(outs) == 2
@@ -307,16 +328,21 @@ def test_pass_when_syntax_error_is_caught_at_construction_not_after_the_fact():
     # Criterion 构造期就报 SyntaxError，而不是烧完所有判官调用、跑到
     # evaluate_all 最后一步才引爆、把已经算好的其它 criteria 结果一并丢光。
     with pytest.raises(SyntaxError):
-        acc.Criterion(annotation="faithfulness", metric="pass_rate",
-                      pass_when="score >=", min_pass_rate=0.9)
+        acc.Criterion(
+            annotation="faithfulness", metric="pass_rate", pass_when="score >=", min_pass_rate=0.9
+        )
 
 
 def test_pass_when_bad_operator_is_caught_at_construction():
     # Ruling R20 (a)：白名单外的运算符（is/in 等）同样要在构造期就报
     # ValueError，不用等到 evaluate_all 才发现。
     with pytest.raises(ValueError):
-        acc.Criterion(annotation="faithfulness", metric="pass_rate",
-                      pass_when="label is 'ok'", min_pass_rate=0.9)
+        acc.Criterion(
+            annotation="faithfulness",
+            metric="pass_rate",
+            pass_when="label is 'ok'",
+            min_pass_rate=0.9,
+        )
 
 
 def test_evaluate_all_survives_a_pass_when_type_error_and_still_scores_the_rest():
@@ -330,8 +356,9 @@ def test_evaluate_all_survives_a_pass_when_type_error_and_still_scores_the_rest(
     acc.record("b", 1.0)
     outs = acc.evaluate_all(
         [
-            acc.Criterion(annotation="a", metric="pass_rate",
-                          pass_when="score >= 'abc'", min_pass_rate=0.9),
+            acc.Criterion(
+                annotation="a", metric="pass_rate", pass_when="score >= 'abc'", min_pass_rate=0.9
+            ),
             acc.Criterion(annotation="b", metric="average", threshold=0.5),
         ]
     )
@@ -351,9 +378,7 @@ def test_max_error_rate_tolerates_one_transient_failure_at_smoke_scale():
     acc.record("faithfulness", 1.0)
     acc.record("faithfulness", 1.0)
     acc.record("faithfulness", None, error="judge timeout")
-    (out,) = acc.evaluate_all(
-        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
-    )
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)])
     assert "exceeds max_error_rate" not in out.reason
     assert out.passed
 
@@ -364,9 +389,7 @@ def test_max_error_rate_still_fails_at_smoke_scale_with_two_errors():
     acc.record("faithfulness", 1.0)
     acc.record("faithfulness", None, error="judge timeout")
     acc.record("faithfulness", None, error="judge timeout")
-    (out,) = acc.evaluate_all(
-        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=1)]
-    )
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2, min_samples=1)])
     assert not out.passed
     assert "exceeds max_error_rate" in out.reason
 
@@ -378,9 +401,7 @@ def test_max_error_rate_tolerates_one_transient_failure_at_master_scale():
     for _ in range(47):
         acc.record("faithfulness", 1.0)
     acc.record("faithfulness", None, error="judge timeout")
-    (out,) = acc.evaluate_all(
-        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
-    )
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)])
     assert "exceeds max_error_rate" not in out.reason
     assert out.passed
 
@@ -391,9 +412,7 @@ def test_max_error_rate_fails_at_master_scale_with_ten_errors():
         acc.record("faithfulness", 1.0)
     for _ in range(10):
         acc.record("faithfulness", None, error="judge timeout")
-    (out,) = acc.evaluate_all(
-        [_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)]
-    )
+    (out,) = acc.evaluate_all([_crit(threshold=0.8, max_error_rate=0.2, min_samples=2)])
     assert not out.passed
     assert "exceeds max_error_rate" in out.reason
 
@@ -421,8 +440,9 @@ def test_criterion_survives_asdict_and_json_dumps():
     import dataclasses
     import json
 
-    c = acc.Criterion(annotation="faithfulness", metric="pass_rate",
-                       pass_when="score >= 0.5", min_pass_rate=0.9)
+    c = acc.Criterion(
+        annotation="faithfulness", metric="pass_rate", pass_when="score >= 0.5", min_pass_rate=0.9
+    )
     payload = json.dumps(dataclasses.asdict(c))
     assert "faithfulness" in payload
     assert "score >= 0.5" in payload

@@ -1,4 +1,5 @@
 """evaluation/deepeval_judge.py 中 JSON 提取工具的单元测试。"""
+
 import pytest
 
 from evaluation.deepeval_judge import GLMJudge
@@ -42,6 +43,7 @@ class TestExtractJson:
         text = '```json\n{\n  "reason": "score 0 because node says "禾蛙" without details"\n}\n```'
         result = GLMJudge._extract_json(text)
         import json as _json
+
         parsed = _json.loads(result)
         assert "reason" in parsed
         assert "禾蛙" in parsed["reason"]
@@ -72,6 +74,7 @@ class TestRetryOnRateLimit:
     def test_retries_on_timeout_then_succeeds(self, monkeypatch):
         """APITimeoutError 应当被重试（智谱 GLM 偶发超时不能让整轮崩）。"""
         import os
+
         os.environ.setdefault("MODEL_ID", "test")
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
@@ -99,6 +102,7 @@ class TestRetryOnRateLimit:
         monkeypatch.setattr(type(judge._model), "invoke", fake_invoke)
 
         import tenacity
+
         monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
 
         out = judge.generate("hi")
@@ -108,6 +112,7 @@ class TestRetryOnRateLimit:
     def test_retries_on_rate_limit_then_succeeds(self, monkeypatch):
         """When _model.invoke raises RateLimitError twice then succeeds, generate() should retry and return final content."""
         import os
+
         os.environ.setdefault("MODEL_ID", "test")
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
@@ -137,6 +142,7 @@ class TestRetryOnRateLimit:
 
         # Speed up the retry waits to keep the test fast.
         import tenacity
+
         monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
 
         out = judge.generate("hi")
@@ -146,6 +152,7 @@ class TestRetryOnRateLimit:
     def test_retries_exhausted_raises(self, monkeypatch):
         """When _model.invoke always rate-limits, generate() should give up after max attempts and re-raise."""
         import os
+
         os.environ.setdefault("MODEL_ID", "test")
         os.environ.setdefault("OPENAI_BASE_URL", "http://localhost")
         os.environ.setdefault("OPENAI_API_KEY", "test")
@@ -166,6 +173,7 @@ class TestRetryOnRateLimit:
         monkeypatch.setattr(type(judge._model), "invoke", fake_invoke)
 
         import tenacity
+
         monkeypatch.setattr(tenacity.nap.time, "sleep", lambda s: None)
 
         with pytest.raises(RateLimitError):

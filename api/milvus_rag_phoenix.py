@@ -44,8 +44,7 @@ RRF_K = 60
 # project_name 由环境变量决定：CI 里 bz-rag-ci，影子 canary 上 bz-rag-canary。
 _tracer_provider = register(
     project_name=os.environ.get("PHOENIX_PROJECT_NAME", "bz-rag-ci"),
-    endpoint=os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006")
-    + "/v1/traces",
+    endpoint=os.environ.get("PHOENIX_COLLECTOR_ENDPOINT", "http://localhost:6006") + "/v1/traces",
     auto_instrument=True,  # 挂载已安装的 openinference instrumentor（LangChain）
 )
 _tracer = _tracer_provider.get_tracer(__name__)
@@ -61,9 +60,7 @@ def _rewrite_query(query: str, history: list[tuple[str, str]]) -> str:
 
 
 def _retrieve(query: str) -> list[Document]:
-    with _tracer.start_as_current_span(
-        "retrieve", openinference_span_kind="retriever"
-    ) as span:
+    with _tracer.start_as_current_span("retrieve", openinference_span_kind="retriever") as span:
         span.set_input(query)
         embeddings = ZhipuEmbeddings(model="embedding-3")
         client = MilvusClient(uri=MILVUS_URI)
@@ -147,8 +144,7 @@ def milvus_rag_phoenix_query_with_context(
         docs = _retrieve(search_query)
         reranked = _rerank(search_query, docs)
         context = "\n\n".join(
-            f"Source: {d.metadata.get('source', '')}\nContent: {d.page_content}"
-            for d in reranked
+            f"Source: {d.metadata.get('source', '')}\nContent: {d.page_content}" for d in reranked
         )
         answer = _generate(query, context, history)
         span.set_output(answer)

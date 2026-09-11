@@ -37,13 +37,13 @@ _CONTEXT_SPAN_KIND = "RERANKER"
 
 class RoundStats(NamedTuple):
     task: str
-    pulled: int      # 从 Phoenix 拉回来的 span 总数
-    skipped: int     # 形状不合适（非根 span / 缺问题或答案）——正常过滤，不是失败
-    deduped: int     # 已有全部同名 annotation，本轮跳过
-    unsampled: int   # 通过了去重但没被采样率选中
-    sampled: int     # 真正送去评的
-    annotated: int   # 成功写回的 annotation 条数
-    errored: int     # 判官失败（label == "errored"）
+    pulled: int  # 从 Phoenix 拉回来的 span 总数
+    skipped: int  # 形状不合适（非根 span / 缺问题或答案）——正常过滤，不是失败
+    deduped: int  # 已有全部同名 annotation，本轮跳过
+    unsampled: int  # 通过了去重但没被采样率选中
+    sampled: int  # 真正送去评的
+    annotated: int  # 成功写回的 annotation 条数
+    errored: int  # 判官失败（label == "errored"）
 
     @property
     def accounted(self) -> int:
@@ -184,9 +184,7 @@ def run_task(
             continue
         candidates.append((root, pending))
 
-    by_trace = _context_spans(
-        client, task, {_trace_id(root) for root, _ in candidates}
-    )
+    by_trace = _context_spans(client, task, {_trace_id(root) for root, _ in candidates})
 
     rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
 

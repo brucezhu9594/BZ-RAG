@@ -1,4 +1,5 @@
 """evaluation/generate_dataset.py 单元测试。"""
+
 from unittest.mock import MagicMock
 
 import pytest
@@ -22,7 +23,9 @@ class TestShortSource:
 
 
 class TestGenerateOne:
-    def _make_doc(self, source: str = "https://cms.hewa.cn/content/mian/helpContent/10006") -> Document:
+    def _make_doc(
+        self, source: str = "https://cms.hewa.cn/content/mian/helpContent/10006"
+    ) -> Document:
         return Document(
             page_content="禾蛙是一个人力资源平台。域名 hewa.cn，成立于 2020 年。",
             metadata={"source": source},
@@ -49,10 +52,10 @@ class TestGenerateOne:
         fake_llm = MagicMock()
         fake_msg = MagicMock()
         fake_msg.content = (
-            '<think>用户问的是这页讲什么。</think>\n'
-            '```json\n'
+            "<think>用户问的是这页讲什么。</think>\n"
+            "```json\n"
             '{"question": "什么是禾蛙", "ground_truth": "人力资源平台"}\n'
-            '```'
+            "```"
         )
         fake_llm.invoke.return_value = fake_msg
 

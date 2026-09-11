@@ -37,7 +37,12 @@ class TestBuildChatMessages:
         history = [("Q1", "A1"), ("Q2", "A2")]
         msgs = build_chat_messages("SYS", "Q3", history)
         assert [m["role"] for m in msgs] == [
-            "system", "user", "assistant", "user", "assistant", "user",
+            "system",
+            "user",
+            "assistant",
+            "user",
+            "assistant",
+            "user",
         ]
         assert msgs[0]["content"] == "SYS"
         assert msgs[1]["content"] == "Q1"

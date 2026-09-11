@@ -21,15 +21,11 @@ import pathlib
 import subprocess
 
 DEFAULT_WEIGHT_PATH = str(pathlib.Path(__file__).parent / "shadow" / "weight.json")
-CF_SCRIPT = str(
-    pathlib.Path(__file__).resolve().parents[2] / "scripts" / "cf-kv-update.sh"
-)
+CF_SCRIPT = str(pathlib.Path(__file__).resolve().parents[2] / "scripts" / "cf-kv-update.sh")
 VALID_TARGETS = ("shadow", "cloud")
 
 
-def set_weight(
-    weight: int, target: str = "shadow", weight_path: str | None = None
-) -> None:
+def set_weight(weight: int, target: str = "shadow", weight_path: str | None = None) -> None:
     if target not in VALID_TARGETS:
         raise ValueError(f"target 必须是 {'/'.join(VALID_TARGETS)}，实际 {target!r}")
     # bool 是 int 的子类，True 会通过 isinstance 检查，必须单独挡掉。

@@ -1,4 +1,5 @@
 """evaluation/build_dataset.py 单元测试：验证幂等同步逻辑。"""
+
 from unittest.mock import MagicMock
 
 import pytest

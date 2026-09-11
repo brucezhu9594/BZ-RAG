@@ -4,6 +4,7 @@
 - retrieve / rerank / generate 各一个 span
 - 读 CONFIDENT_API_KEY 后台异步上报 Confident AI Observatory
 """
+
 import os
 
 from deepeval.tracing import (
@@ -103,8 +104,7 @@ def milvus_rag_query(query: str, thread_id: str | None = None) -> str:
     docs = _retrieve_span(query)
     reranked = _rerank_span(query, docs)
     context = "\n\n".join(
-        f"Source: {d.metadata.get('source', '')}\nContent: {d.page_content}"
-        for d in reranked
+        f"Source: {d.metadata.get('source', '')}\nContent: {d.page_content}" for d in reranked
     )
     answer = _generate_span(query, context)
     update_current_trace(

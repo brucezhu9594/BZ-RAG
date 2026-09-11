@@ -53,9 +53,7 @@ class TestMakeStatefulPredict:
     def test_rerun_same_turn_does_not_duplicate(self):
         """preflight 重复跑首轮：键记录覆盖而非 append，后续轮历史不出现重复。"""
         calls = []
-        predict = make_stateful_predict(
-            _data(("Q1", "s"), ("Q2", "s")), _fake_pipeline(calls)
-        )
+        predict = make_stateful_predict(_data(("Q1", "s"), ("Q2", "s")), _fake_pipeline(calls))
         predict("Q1", "s")  # preflight
         predict("Q1", "s")  # 正式
         predict("Q2", "s")

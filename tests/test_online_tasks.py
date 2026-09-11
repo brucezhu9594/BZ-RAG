@@ -39,9 +39,7 @@ class TestValid:
 
     def test_online_evaluator_set_excludes_ground_truth_judges(self):
         """线上没有 ground truth，需要 expected 的两个判官不可用。"""
-        assert ONLINE_EVALUATORS == frozenset(
-            {"faithfulness", "answer_relevancy", "refusal_check"}
-        )
+        assert ONLINE_EVALUATORS == frozenset({"faithfulness", "answer_relevancy", "refusal_check"})
 
 
 class TestRejects:

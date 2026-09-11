@@ -71,12 +71,7 @@ def main():
         import jieba
 
         tokens = " ".join(w for w in jieba.cut(probe) if w.strip())
-        results = (
-            tbl.search(tokens, query_type="fts")
-            .select(["text", "source"])
-            .limit(2)
-            .to_list()
-        )
+        results = tbl.search(tokens, query_type="fts").select(["text", "source"]).limit(2).to_list()
         for r in results:
             snippet = (r.get("text") or "")[:60]
             print(f"  _score={r.get('_score', 0):.3f}  {snippet}  ({r.get('source', '')})")

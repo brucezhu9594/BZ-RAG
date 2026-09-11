@@ -258,9 +258,7 @@ class TestContextFetch:
             seen["contexts"] = output["contexts"]
             return {"name": "refusal_check", "score": 1.0, "label": "ok", "explanation": ""}
 
-        c = FakeClient(
-            [_span("a")], context_spans=[self._reranker("a", ["片段一", "片段二"])]
-        )
+        c = FakeClient([_span("a")], context_spans=[self._reranker("a", ["片段一", "片段二"])])
         run_task(c, TASK, now=NOW, judges={"refusal_check": spy})
         assert seen["contexts"] == ["片段一", "片段二"]
 

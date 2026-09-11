@@ -62,7 +62,9 @@ def test_query_thread_id_optional(monkeypatch):
     monkeypatch.setattr(milvus_rag, "_retrieve_span", lambda q: [_doc("d1")])
     monkeypatch.setattr(milvus_rag, "_rerank_span", lambda q, docs: docs)
     monkeypatch.setattr(milvus_rag, "_generate_span", lambda q, c: "ans")
-    monkeypatch.setattr(milvus_rag, "update_current_trace", lambda **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(
+        milvus_rag, "update_current_trace", lambda **kwargs: captured.update(kwargs)
+    )
 
     answer = milvus_rag.milvus_rag_query("问题")
 
