@@ -31,4 +31,37 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit dependencies
-        run: pip-audit -r requirements.txt --strict
+        run: |
+          # pip-audit 对 torch 报 "Dependency not found on PyPI"，本工作流因此连续
+          # 红了很多周（见 CD-pipeline.md Q7）。根因不是漏洞，是版本号解析：
+          # --extra-index-url 指向 PyTorch 自家 index，解析出来带 PEP 440 本地版本
+          # 标识 torch==2.13.0+cpu，而 PyPI 上只有 2.13.0，查不到就判失败。
+          #
+          # 审计时把那一行剔掉，让 torch 走 PyPI 解析。这不是绕过检查：
+          #   - CPU 版与默认版是同一份源码，漏洞数据完全相同；
+          #   - requirements.txt 本来就没锁 torch 版本，PyPI 解析出的最新版
+          #     正是实际 build 时会装的那个版本。
+          #
+          # 保留 --strict 不动。去掉 --strict 是另一种"让它变绿"的办法，但那会让
+          # **任何**解析不了的包都静默通过——将来再冒出一个就没人知道了。这里只针对
+          # torch 这一个已查明原因的包做处理，其余依赖仍然严格审计。
+          PYTORCH_INDEX='^--extra-index-url https://download\.pytorch\.org/whl/cpu'
+
+          # 先断言假设还成立，再动手。将来有人改掉或删掉 requirements.txt 里那行
+          # extra-index-url 时，这里要当场报错——而不是静默地什么都没剔除、
+          # 然后要么又红回去、要么更糟：让人以为审计范围还是原来那个。
+          if [ "$(grep -cE "$PYTORCH_INDEX" requirements.txt)" -ne 1 ]; then
+            echo "ERROR: requirements.txt 里找不到预期的那行 PyTorch extra-index-url。"
+            echo "       本步骤的前提已失效，请重新确认 torch 的安装来源后再改这里。"
+            exit 1
+          fi
+
+          grep -vE "$PYTORCH_INDEX" requirements.txt > requirements-audit.txt
+
+          if ! grep -q '^torch$' requirements-audit.txt; then
+            echo "ERROR: torch 不该被剔除，只该剔除 extra-index-url 那一行。"
+            exit 1
+          fi
+          echo "已剔除 PyTorch 自家 index，torch 改由 PyPI 解析后纳入审计。"
+
+          pip-audit -r requirements-audit.txt --strict

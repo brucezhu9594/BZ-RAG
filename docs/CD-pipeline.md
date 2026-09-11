@@ -1221,9 +1221,21 @@ curl -i \
 
 ### Q7：pip-audit 说 `torch+cpu not on PyPI`，Security workflow 红
 
-**原因**：torch 的 CPU 版本只在 PyTorch 自家 index 上，PyPI 没有。pip-audit `--strict` 模式遇到查不到的包直接判失败。
+**原因**：不是漏洞，是版本号解析。`--extra-index-url` 指向 PyTorch 自家 index，解析出来带
+PEP 440 本地版本标识 `torch==2.13.0+cpu`，而 PyPI 上只有 `2.13.0`，pip-audit `--strict`
+查不到就判失败。这条让 Security workflow 连红了至少 5 周（每周一定时跑）。
 
-**解决**：去掉 `--strict`（让 pip-audit 警告但不失败），或者完全切回 GPU 版（牺牲构建稳定性）。
+**已修（2026-09-11）**：审计前把那行 `--extra-index-url` 剔掉，让 torch 走 PyPI 解析。
+这不是绕过检查——CPU 版与默认版是同一份源码、漏洞数据完全相同，而且 `requirements.txt`
+本来就没锁 torch 版本，PyPI 解析出的最新版正是实际 build 时会装的那个。
+
+**没有采用「去掉 `--strict`」**：那是另一种让它变绿的办法，但会让**任何**解析不了的包都静默
+通过，将来再冒出一个就没人知道了。现在只针对 torch 这一个已查明原因的包处理，其余依赖仍然
+严格审计。
+
+剔除动作前后各有一条断言：`extra-index-url` 那行必须恰好存在一条（否则前提已失效，当场报错），
+剔完之后 `torch` 必须还在（否则说明 grep 写错误删）。两条都验证过真的会触发——不加断言的话，
+将来谁改了 requirements.txt 的那一行，这一步会静默地什么都没剔除，让人以为审计范围没变。
 
 ---
 
