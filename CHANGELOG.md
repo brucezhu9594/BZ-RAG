@@ -1,3 +1,12 @@
+## [1.8.1](https://github.com/brucezhu9594/BZ-RAG/compare/v1.8.0...v1.8.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **cd:** 部署成败改用白名单判定，黑名单会把失败放行成成功 ([f4a3b06](https://github.com/brucezhu9594/BZ-RAG/commit/f4a3b06200ec9feb2a7e1c011911ce8a744908e3))
+* **ci:** Security 扫描修复——torch 的 +cpu 本地版本标识让 pip-audit 判红 ([3502fc9](https://github.com/brucezhu9594/BZ-RAG/commit/3502fc9b723f54350a84bc3a20837bce56847626))
+* **lint:** ruff check 清零（用户在改的 mlflow_evaluate_multiturn.py 除外） ([15b0045](https://github.com/brucezhu9594/BZ-RAG/commit/15b0045206b287592c7556ee09404584a20a1541))
+
 # [1.8.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.7.0...v1.8.0) (2026-09-11)
 
 
