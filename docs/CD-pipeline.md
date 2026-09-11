@@ -600,6 +600,87 @@ canary-guardrail          12        0       12          0        0          0   
 这也是为什么影子侧的权重参数形状要和 `scripts/cf-kv-update.sh` 保持一致
 （0–100 整数），将来 monitor 不用改。
 
+#### 期 3（2026-09-11 完成）：闭环——评分驱动部署决策
+
+期 2 把分数写到了 span 上，但**没有任何东西读它做判断**。期 3 补上这一环。
+
+| 文件 | 作用 |
+|---|---|
+| `evaluation/phoenix/monitor.py` | 读 annotation → 喂 `acceptance` → 输出 rollback / hold / promote。**只判定不动作** |
+| `evaluation/phoenix/rollback.py` | 权重归零：影子侧写 `weight.json`，云侧调 `cf-kv-update.sh` |
+| `evaluation/phoenix/harvest.py` | 按 annotation 筛失败 span → 写进 `bz-rag-harvested` 人工分诊队列 |
+| `.github/workflows/canary-watch.yml` | 改：worker 之后跑 monitor，判定 rollback 则自动执行 |
+| `.github/workflows/promote-stable.yml` | 改：加 `gate` 前置 job，monitor 不达标拒绝晋级 |
+
+**monitor 复用期 1 的聚合引擎**——`criteria.yaml` 的 `online` 段与 `offline` 段
+共用同一套阈值语言、同一份 `acceptance.py`。区别只在输入来源。
+
+##### 三态的两条关键语义
+
+**① hold 优先于 rollback。** 样本不足意味着"还判不了"，此时任何质量结论都不可信，
+贸然 rollback 会把好版本也打回去。所以即便同时存在"够样本且失败"的 criterion，
+只要有一条样本不足，整体就判 hold。
+
+**② 判"样本不足"用 `Outcome.samples < criterion.min_samples`，不匹配 reason 字符串。**
+reason 是给人看的显示文本，改一个字就会把判定改坏。
+
+退出码 `0=promote / 1=rollback / 2=hold`。hold 单独占 2，是因为 CI 要能区分
+"不达标"和"还判不了"——两者处置完全不同（前者回滚，后者再等等）。
+
+##### 实测
+
+**monitor（本机，4320 分钟窗口）**：收集到 faithfulness 2 / refusal_check 16 /
+answer_relevancy 2，判定 `hold`、EXIT=2，理由精确到每条缺多少。
+
+**monitor（CI，`Canary Watch` run 34552929212）**：默认 180 分钟窗口拉到 0 条，
+
+```
+窗口 180 分钟，收集到 annotation：无
+>>> 判定：hold  （样本不足：faithfulness 只有 0 条，需要 20；refusal_check 只有 0 条，需要 20）
+monitor state = hold (exit 2)
+```
+
+`Apply rollback if needed` 步骤被 skip。**0 样本判 hold 而不是 promote**，
+正是 spec §4.9 最担心的那个坑（"刚部署完没几条 trace 就被判全绿"）被挡住了。
+
+**rollback（本机）**：权重 50 → 0 → 50 往返，分流器**不重启即时生效**
+（`router.py` 每次请求都重读 `weight.json`）。
+
+**harvest（本机）**：`refusal_check` 分布 `ok:13 / refused:3`，3 条 refused
+全部正确捞回，写进 `bz-rag-harvested`，`expected_response` 留空待人补、
+`metadata.source_span_id` 可回跳原 span。
+
+##### 期 3 的三处边界
+
+**① 真机只能看到 hold 这一态。** `criteria.yaml` 的 `online` 段两条 criteria 都要
+`min_samples: 20`，而当前 faithfulness 只有 2 条（采样率 0.2）、refusal_check 16 条。
+`rollback` 与 `promote` 由单测的受控数据覆盖（含"hold 优先"这条关键语义）。
+要在真机演全三态，需先打约 100 条 replay 流量。
+
+**② spec 说的"promote 达标自动开 GitHub issue"未实现。** 改由 `promote-stable.yml`
+的前置门实现"要人确认"这个诉求——不达标直接拒绝晋级，比开 issue 更硬。
+要自动开 issue 需另做，且需要 `issues: write` 权限。
+
+**③ 真云侧 rollback 跑不通。** `cf-kv-update.sh` 需要 `CF_API_TOKEN`，至今未配置
+（本文档 §10 的遗留项）。所以默认 `target=shadow`；走 `--target cloud` 且 token
+缺失时**明确抛错**，绝不静默跳过——"以为回滚了其实没回滚"比直接失败危险得多。
+
+##### harvest 为什么不写进 golden 集（与 spec §4.10 的偏差）
+
+spec 原文说"追加进 golden 集"，查证后行不通，两个独立原因：
+
+1. **会被抹掉。** 门禁的真实数据源是本地 `evaluation/test_dataset.json`
+   （`cases.py` 从它读），Phoenix 上的 `bz-rag-golden` 只是镜像；而 `dataset.py`
+   用的 `create_dataset(example_id_key=...)` 是**全量替换**语义——"上传里没有的
+   example 会被删"。回灌进去的样本下一次推送就没了。
+2. **没有 ground truth。** `expected_response` 是 `contextual_precision` /
+   `contextual_recall` 两个判官的必需输入，线上 span 上没有标准答案，
+   混进金标集只会让这两个判官对它们全部 errored。
+
+所以改成独立的 `bz-rag-harvested` 作人工分诊队列：人看过、补上标准答案，
+手工加进 `test_dataset.json`，再走正常的 `dataset.py` 推送。
+**回灌这条环由人闭合，不自动闭合**——与 promote 需人确认是同一条谨慎原则。
+
 ##### runner 必须装成 Windows 服务，否则活不过一个终端会话
 
 注册时如果**没带** `--runasservice`，runner 只能用 `run.cmd` 以前台进程方式跑，
@@ -1080,10 +1161,11 @@ curl -i \
    **正在被 Phoenix 评估这条线解决，但还差最后一步**：
    - 期 1（已完成）：合并前的离线质量门禁，见上面「门禁状态沿革」
    - 期 2（已完成，2026-09-10）：线上评估 worker 把判官分数写回 span，见下面「期 2」
-   - **期 3（未开工）**：`monitor.py` 读线上 annotation 聚合成三态
-     （rollback / hold / promote），`promote-stable.yml` 加前置 job 调它，
-     不达标直接拒绝 promote。**这一步做完，本条遗留项才算真正闭上。**
-     现在的状态是"有信号、没决策"——分数写在 span 上了，但没有任何东西读它做判断。
+   - **期 3（已完成，2026-09-11）**：`monitor.py` 聚合三态，`canary-watch` 自动
+     rollback，`promote-stable.yml` 加前置门不达标拒绝晋级。见下面「期 3」。
+     **本条遗留项到此闭上**——promote 的判据从"人觉得观察够了"换成了"线上评分达标"。
+     仍有一处未自动化：spec 说 promote 达标要自动开 GitHub issue，
+     当前只打印判定，由前置门硬挡代替（不达标直接拒绝晋级，比开 issue 更硬）。
 
 ---
 
