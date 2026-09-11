@@ -83,3 +83,32 @@ jobs:
             Write-Host "::error::online worker round failed"
             exit $LASTEXITCODE
           }
+
+      # monitor 的退出码：0=promote 1=rollback 2=hold。
+      # 三个都是"正常结果"，所以这一步用 continue-on-error 接住非零退出码，
+      # 把判定放进 step output 交给下一步处置——让 job 因为 rollback 而变红是错的：
+      # rollback 说明机制正常工作了，不是 CI 故障。只有 monitor 自己崩了（其它
+      # 退出码）才该让这一步真红。
+      - name: Run monitor
+        id: monitor
+        continue-on-error: true
+        run: |
+          python -m evaluation.phoenix.monitor --project bz-rag-canary --window-minutes 180
+          $code = $LASTEXITCODE
+          $state = switch ($code) { 0 { "promote" } 1 { "rollback" } 2 { "hold" } default { "error" } }
+          Write-Host "monitor state = $state (exit $code)"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "state=$state" -Encoding utf8
+          if ($state -eq "error") { exit $code }
+
+      # rollback 是收敛动作（错了只是回到老版本），所以自动执行。
+      # promote 是扩散动作，机器判"够好了"的置信度不足以省掉人点一下——
+      # 这里不自动晋级，放行由 promote-stable.yml 的前置门把关（spec 的决策表）。
+      - name: Apply rollback if needed
+        if: steps.monitor.outputs.state == 'rollback'
+        run: |
+          python -m evaluation.phoenix.rollback 0 --target shadow
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::rollback failed"
+            exit $LASTEXITCODE
+          }
+          Write-Host "::warning::canary rolled back to weight 0"
