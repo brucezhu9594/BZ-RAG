@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.7.0...v1.8.0) (2026-09-11)
+
+
+### Features
+
+* **eval:** 给 contextual_precision 补上门禁 criterion ([ad701e2](https://github.com/brucezhu9594/BZ-RAG/commit/ad701e20f236496d2dc3cd076f6e4c7f573c8dbf))
+
 # [1.7.0](https://github.com/brucezhu9594/BZ-RAG/compare/v1.6.0...v1.7.0) (2026-09-11)
 
 
