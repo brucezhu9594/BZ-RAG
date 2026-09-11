@@ -325,7 +325,7 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
 
 | 字段 | 含义 |
 |---|---|
-| `annotation` | 判官的名字，对应 `evaluators.py` 里 `_JUDGES` 的 key（`faithfulness` / `answer_relevancy` / `contextual_recall` / `refusal_check`；`contextual_precision` 判官一直在跑，但当前没有任何 criterion 引用它——只是跑了、记了，没被拿去判定） |
+| `annotation` | 判官的名字，对应 `evaluators.py` 里 `_JUDGES` 的 key。五个判官（`faithfulness` / `answer_relevancy` / `contextual_precision` / `contextual_recall` / `refusal_check`）现在都有 criterion 引用——`contextual_precision` 是 2026-09-11 最后补上的，此前它一直只是跑了、记了，没被拿去判定 |
 | `metric` | `average`（均值必须过 `threshold`）或 `pass_rate`（按 `pass_when` 表达式判定每条通过与否，通过比例必须达到 `min_pass_rate`）二选一 |
 | `threshold` | `metric: average` 专用，均值要达到的门槛 |
 | `direction` | `maximize`（默认，均值要 `>= threshold`）或 `minimize`（均值要 `<= threshold`，给 latency 这类"越小越好"的指标用） |
@@ -344,6 +344,42 @@ App 私钥（`.pem` 文件）的内容存在 GitHub Secret `APP_PRIVATE_KEY`，C
 本轮的 C1 教训就是阈值从没在真实基线上测过就写进了 `criteria.yaml`，结果门禁在未改动的代码上就是
 红的（见上面「当前状态：门禁处于观测态」）。调阈值前先跑一次 smoke（或看最近一次 CI 记分卡）拿到
 实测基线，再决定新阈值，而不是先定一个"看起来严格"的数字再去凑。
+
+**案例：`contextual_precision` 的定阈过程（2026-09-11）。** 这条 criterion 补得最晚，也最完整地
+演了一遍上面这句话为什么不是套话。
+
+1. 先按 `metric: average` 定。修复后八次全量跑的均值是 0.775 / 0.781 / 0.803 / 0.823 / 0.823 /
+   0.854 / 0.857 / 0.870，照"最小观测值再减一个极差"本该取 0.70，而且它正好落在坏态
+   （rerank + BM25 两个 bug 修复**之前**只有 0.208 / 0.281）和健康态中间，看起来无懈可击。
+2. 但 PR 上跑的是 smoke，只有 3 条固定 case，而这 3 条在本指标上根本不代表全量：
+
+   | smoke case | n | 实测分数 |
+   |---|---|---|
+   | 在禾蛙平台上发布职位时，顾问需要提供哪些信息？ | 11 | 0.5 × 11（稳定，不是抖动） |
+   | 在禾蛙平台上，如果用户收到一条超差评，会扣除多少蛙贝？ | 8 | 0.5 × 5、1.0 × 3（双峰） |
+   | 在禾蛙平台上推荐的简历需要满足哪些标准？ | 11 | 1.0 × 11 |
+
+   所以 smoke 的单次均值只可能是 `(0.5+0.5+1.0)/3 = 0.667` 或 `(0.5+1.0+1.0)/3 = 0.833` 两个值。
+   threshold 0.70 之下，约六成的 PR 会在**未改动的代码**上判红——正是 C1 那个"门禁在基线上恒红"，
+   换了个指标又来一遍。
+3. 更值得记的是差点被这个坑骗过去：回放历史时看到 `demo/eval-gate-catches-bad-prompt` 和
+   `embedswap` 两个分支的 smoke 跑分是 0.667 FAIL，第一反应是"criterion 抓住了坏 prompt，说明
+   阈值选对了"。其实 0.667 就是 smoke 的基线值，什么都没抓到——**一个在基线上也会红的阈值，
+   它的"红"不携带任何信息**。
+4. 换成 `metric: pass_rate` + `pass_when: "score >= 0.5"` 就没这个毛病：上面 30 次 smoke 观测里
+   没有任何一条掉到 0.5 以下，smoke 恒定 3/3；全量跑是 0.913~1.000；而坏态只有 0.333 / 0.375。
+   区分力反而比 average 更好。
+5. 取 0.85：比最差的健康跑（0.913）低 0.063，比最好的坏跑（0.375）高 0.475，两边都不贴边。
+   不取 0.9，是因为 0.9 只比 0.913 低 0.013，n=23 的全量跑上再多坏一条就是 0.870，直接红——
+   那又是一个贴着基线的阈值。
+
+一句话结论：**定阈值要同时量全量和 smoke 两个规模**。只看全量的分布，会写出一个在 PR 上恒红的
+阈值；而 PR 恒红比没有门禁更糟，它会很快训练出"红了先重跑"的习惯。
+
+顺带量出来一个真实的检索缺口（不是门禁问题，是知识库问题）：「如何修改在禾蛙平台绑定的手机
+号码？」这条 case 的 `contextual_precision` 十次跑分是 0.0 × 8 + 0.5 × 2，均值 0.100，是全集里
+唯一一条系统性检索不到的。上面 0.85 这个阈值容得下它（全量 n=48 时它只占 2 条），但它本身值得
+单独修。
 
 #### 怎么启动 / 确认本机 Milvus(19530) 与 Phoenix(6006)
 

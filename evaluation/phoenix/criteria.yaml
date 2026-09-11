@@ -30,6 +30,34 @@ offline:
     threshold: 0.8
     min_samples: 2
     max_error_rate: 0.2
+  # contextual_precision 判的是"检索结果的排序质量"——有用片段有没有排在前面。
+  # 2026-09-11 补上：它从期 1 起就有判官、有分数、写进 Phoenix，却一直不在本文件里，
+  # 等于算了不用。五个判官里唯一没有闸门的一个。
+  #
+  # 为什么是 pass_rate 而不是 average——这条差点又踩一遍 R37。
+  # 先按 average 定：修复后八次全量跑均值 0.775~0.854，照"最小值再减一个极差"
+  # 本该取 0.70。但 smoke 只跑 3 条固定 case，而这 3 条在本指标上根本不代表全量：
+  #   「发布职位需要提供哪些信息」 11 次全是 0.5（稳定，不是抖动）
+  #   「超差评扣多少蛙贝」         8 次里 5 次 0.5、3 次 1.0（双峰）
+  #   「推荐简历标准」             11 次全是 1.0
+  # 于是 smoke 的单次均值只会是 0.667 或 0.833 两个值，threshold 0.70 下
+  # 约六成的 PR 会在未改动的代码上判红——正是 R37 那个"门禁在基线上恒红"。
+  # 我一开始还把历史上 demo/embedswap 两个分支的 0.667 读成"criterion 抓住了
+  # 坏 prompt"，其实 0.667 就是 smoke 的基线值，什么也没抓到。
+  #
+  # pass_rate(score >= 0.5) 没有这个毛病：上面 30 次 smoke 观测里没有任何一条
+  # 掉到 0.5 以下，smoke 恒定 3/3；而全量跑是 0.913~1.000。
+  # 区分力反而更好——rerank 与 BM25 两个 bug 修复**之前**，同一口径只有
+  # 0.333 / 0.375。0.85 比最差的健康跑（0.913）低 0.063，比最好的坏跑
+  # （0.375）高 0.475，两边都不贴边。
+  # 不取 0.9：0.9 只比 0.913 低 0.013，n=23 的全量跑上再多坏一条就是
+  # 0.870，直接红——那又是一个贴着基线的阈值。
+  - annotation: contextual_precision
+    metric: pass_rate
+    pass_when: "score >= 0.5"
+    min_pass_rate: 0.85
+    min_samples: 2
+    max_error_rate: 0.2
   - annotation: contextual_recall
     metric: pass_rate
     pass_when: "label != 'incorrect'"
